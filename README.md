@@ -2,6 +2,112 @@
 
 Custom pipeline + native OpenCode integration to run a multi-phase software-engineering workflow (`intent -> triage -> requirements -> plan -> code -> test -> review -> docs -> execute -> verify -> gates`).
 
+```mermaid
+flowchart TD
+  A["Human: Open opencode"] --> B["Local: Bootstrap + policy-as-code + runtime assertions"]
+  B --> C["Human: Submit prompt"]
+  C --> D["Local Ingress Guard: sanitize + taint-track untrusted context + secret redaction"]
+  D --> E["Local Supervisor: queue + budget envelope (tokens/tools/time)"]
+
+  E --> EI["LLM Intent Agent: repo-aware rewrite + target_files/proposed_new_files (Implemented)"]
+  EI --> EIG{"Local Intent Resolution Gate: resolve/ambiguous/missing paths (Implemented)"}
+  EIG -->|Ambiguous/Missing| K
+  EIG -->|Resolved| F["LLM Triage/Router: classify task + confidence score"]
+
+  F --> G{"Local Gate: router confidence >= threshold?"}
+  G -->|No| H["Local Fail-safe: deeper pipeline or human triage required"]
+  G -->|Yes| I["LLM Requirements Agent: criteria/non-goals/open questions"]
+  H --> I
+
+  I --> J{"Local Gate: requirements clear?"}
+  J -->|No| K["Human: structured clarification/approval"]
+  K --> D
+  J -->|Yes| L["Local Versioning Agent: create codex/task branch"]
+
+  L --> M["LLM Planner: execution/risk/test/security plan"]
+  M --> N["LLM Coder: minimal diff + strict file_edits/target_files enforcement (Implemented)"]
+  N --> O["Local Tool Runner: apply patch (repo.write/repo.search; new-file guard; basename resolve) (Implemented)"]
+  O --> P["LLM Test Agent: generate/update tests"]
+  P --> Q["Local CI: deterministic gate suite + flaky governance"]
+  Q --> R{"Local Gate: CI pass?"}
+  R -->|No| S["LLM Repair Loop: diagnose/fix"]
+  S --> O
+
+  R -->|Yes| T["LLM Security Agent: threat/privacy review"]
+  T --> U["Local Security: continuous scans + artifact signing"]
+  U --> V{"Local Gate: security pass?"}
+  V -->|No| S
+
+  V -->|Yes| W["LLM QA/Perf Agents: matrix + budget checks"]
+  W --> X["Local QA/Perf: env matrix + regression budgets"]
+  X --> Y{"Local Gate: QA/Perf pass?"}
+  Y -->|No| S
+
+  Y -->|Yes| Z["LLM Reviewer: regression/risk findings"]
+  Z --> ZA{"Local Gate: reviewer pass?"}
+  ZA -->|No| S
+
+  ZA -->|Yes| ZB["Local State Manager: versioned state + invalidation/replay"]
+  ZB --> ZC["Local Versioning: PR + provenance bundle"]
+
+  ZC --> ZD{"Local Gate: policy waiver needed?"}
+  ZD -->|Yes| ZE["Human: approve waiver (reason/owner/expiry)"]
+  ZE --> ZF["Local: immutable waiver log + follow-up task"]
+  ZD -->|No| ZG["Human: structured merge approval"]
+  ZF --> ZG
+  ZG -->|No| S
+  ZG -->|Yes| ZH["Local: protected merge to main"]
+
+  ZH --> ZI["Local Release: staged dev->staging->prod + canary"]
+  ZI --> ZJ{"Human: prod approval required?"}
+  ZJ -->|Yes| ZK["Human: approve rollout"]
+  ZJ -->|No| ZL["Local Deploy Runner: execute rollout"]
+  ZK --> ZL
+
+  ZL --> ZM["Local Observability: golden signals + synthetic checks + SLOs"]
+  ZM --> ZN{"Local Gate: healthy?"}
+  ZN -->|No| ZO["Local: auto rollback + incident + postmortem seed"]
+  ZN -->|Yes| ZP["Local Audit: immutable end-to-end trail"]
+
+  ZO --> ZP
+  ZP --> ZQ["Local Platform Health: eval harness + drift + router accuracy + queue backlog"]
+  ZQ --> ZR{"Local Gate: platform healthy?"}
+  ZR -->|No| ZS["Local Safe Mode: disable risky automation"]
+  ZR -->|Yes| ZT["Human: next prompt"]
+  ZS --> ZT
+
+  ZT --> ZU["Local DR Control: backup/restore verification (RTO/RPO checks)"]
+  ZU --> ZV{"Local Gate: DR pass?"}
+  ZV -->|No| ZW["Human: incident command + recovery approval"]
+  ZW --> ZX["Local: run recovery playbook"]
+  ZV -->|Yes| ZY["Local Access Governance: RBAC/least-privilege recertification"]
+  ZX --> ZY
+  ZY --> ZZ{"Local Gate: access policy compliant?"}
+  ZZ -->|No| ZW
+  ZZ -->|Yes| D
+
+  %% Extra implemented bridge pieces
+  C --> BR1["Local Native Bridge: /model provider+model+auth/baseURL -> external pipeline env (Implemented)"]
+  BR1 --> E
+  ZB --> ST1["Local Runtime State: .opencode-pipeline/state.json persisted per workspace (Implemented)"]
+
+  classDef human fill:#FDE68A,stroke:#92400E,color:#111827,stroke-width:1px;
+  classDef local fill:#BFDBFE,stroke:#1E3A8A,color:#111827,stroke-width:1px;
+  classDef llm fill:#C7F9CC,stroke:#166534,color:#111827,stroke-width:1px;
+
+  class A,C,K,ZE,ZG,ZJ,ZK,ZT,ZW human;
+  class B,D,E,G,H,J,L,O,Q,R,U,V,X,Y,ZA,ZB,ZC,ZD,ZF,ZH,ZI,ZL,ZM,ZN,ZO,ZP,ZQ,ZR,ZS,ZU,ZV,ZX,ZY,ZZ,BR1,ST1,EIG local;
+  class F,I,M,N,P,S,T,W,Z,EI llm;
+
+  classDef implemented stroke:#166534,stroke-width:3px;
+  classDef planned stroke:#9CA3AF,stroke-dasharray: 6 4,stroke-width:2px;
+
+  class EI,EIG,N,O,BR1,ST1 implemented;
+  class B,D,F,G,H,I,J,K,L,M,P,Q,R,S,T,U,V,W,X,Y,Z,ZA,ZB,ZC,ZD,ZE,ZF,ZG,ZH,ZI,ZJ,ZK,ZL,ZM,ZN,ZO,ZP,ZQ,ZR,ZS,ZT,ZU,ZV,ZW,ZX,ZY,ZZ planned;
+
+```
+
+
 This repo **does not vendor** OpenCode core.  
 Instead, it includes a patch file for upstream OpenCode:
 
