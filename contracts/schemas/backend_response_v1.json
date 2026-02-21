@@ -1,0 +1,62 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "request_id",
+    "model",
+    "output_text",
+    "finish_reason",
+    "usage",
+    "trace_events"
+  ],
+  "properties": {
+    "version": {"type": "string", "enum": ["v1"]},
+    "request_id": {"type": "string"},
+    "model": {"type": "string"},
+    "output_text": {"type": "string"},
+    "finish_reason": {
+      "type": "string",
+      "enum": ["stop", "length", "tool_call", "error"]
+    },
+    "usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["prompt_tokens", "completion_tokens", "total_tokens"],
+      "properties": {
+        "prompt_tokens": {"type": "integer"},
+        "completion_tokens": {"type": "integer"},
+        "total_tokens": {"type": "integer"}
+      }
+    },
+    "trace_events": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/traceEvent"}
+    }
+  },
+  "$defs": {
+    "traceEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_type", "timestamp", "phase", "detail", "level"],
+      "properties": {
+        "event_type": {
+          "type": "string",
+          "enum": [
+            "plan",
+            "decision",
+            "tool_call",
+            "tool_result",
+            "reasoning_summary",
+            "gate",
+            "status"
+          ]
+        },
+        "timestamp": {"type": "number"},
+        "phase": {"type": "string"},
+        "detail": {"type": "string"},
+        "level": {"type": "string", "enum": ["info", "warn", "error"]}
+      }
+    }
+  }
+}

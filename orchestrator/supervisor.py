@@ -1,0 +1,769 @@
+from __future__ import annotations
+
+import heapq
+import json
+import time
+import uuid
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+from typing import Callable, Dict, List, Optional
+
+from contracts.registry import ContractRegistry
+from orchestrator.approvals import ApprovalManager
+from orchestrator.audit import AuditLogger, ProvenanceBundler
+from orchestrator.resilience import ResilienceManager
+from policy.engine import PolicyContext, evaluate_pre_merge
+from orchestrator.tool_runner import ToolRequest, ToolRunner
+from orchestrator.verification import VerificationRunner
+from orchestrator.versioning import VersioningAgent, VersioningResult
+
+
+PRIORITY_ORDER = {
+    "interactive": 0,
+    "release_blocking": 1,
+    "background": 2,
+}
+
+
+@dataclass
+class PhaseResult:
+    phase: str
+    status: str
+    detail: str
+    timestamp: float
+
+
+@dataclass
+class Task:
+    task_id: str
+    prompt: str
+    priority: str
+    created_at: float
+    work_branch: Optional[str] = None
+    trusted_context: bool = True
+    agent_outputs: Dict[str, Dict] = field(default_factory=dict)
+    handoff_artifacts: Dict[str, Dict] = field(default_factory=dict)
+    provenance_bundle_path: Optional[str] = None
+    execution_mode: str = "normal"
+    replay_source: Optional[str] = None
+    degraded_mode: bool = False
+    safe_mode: bool = False
+    failure_count: int = 0
+    tool_calls: int = 0
+    status: str = "queued"
+    phase_history: List[PhaseResult] = field(default_factory=list)
+
+
+class TaskQueue:
+    def __init__(self) -> None:
+        self._heap: List[tuple] = []
+        self._seq = 0
+
+    def enqueue(self, task: Task) -> None:
+        score = PRIORITY_ORDER.get(task.priority, PRIORITY_ORDER["background"])
+        heapq.heappush(self._heap, (score, task.created_at, self._seq, task))
+        self._seq += 1
+
+    def dequeue(self) -> Optional[Task]:
+        if not self._heap:
+            return None
+        return heapq.heappop(self._heap)[-1]
+
+    def __len__(self) -> int:
+        return len(self._heap)
+
+
+class StateStore:
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+
+    def load(self) -> Dict[str, Dict]:
+        if not self.path.exists():
+            return {"tasks": {}}
+        raw = self.path.read_text(encoding="utf-8")
+        if not raw.strip():
+            return {"tasks": {}}
+        data = json.loads(raw)
+        if "tasks" not in data or not isinstance(data["tasks"], dict):
+            data["tasks"] = {}
+        return data
+
+    def save(self, data: Dict[str, Dict]) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+
+    def save_task(self, task: Task) -> None:
+        data = self.load()
+        data["tasks"][task.task_id] = self._serialize_task(task)
+        self.save(data)
+
+    def load_task(self, task_id: str) -> Optional[Dict]:
+        data = self.load()
+        return data["tasks"].get(task_id)
+
+    @staticmethod
+    def _serialize_task(task: Task) -> Dict:
+        payload = asdict(task)
+        payload["phase_history"] = [asdict(item) for item in task.phase_history]
+        return payload
+
+
+class Supervisor:
+    def __init__(
+        self,
+        queue: TaskQueue,
+        state_store: StateStore,
+        phase_handlers: Optional[Dict[str, Callable[[Task], PhaseResult]]] = None,
+        phase_order: Optional[List[str]] = None,
+        policy_context_resolver: Optional[Callable[[Task], PolicyContext]] = None,
+        versioning_agent: Optional[VersioningAgent] = None,
+        base_branch: str = "main",
+        tool_runner: Optional[ToolRunner] = None,
+        execute_tool_name: str = "repo.search",
+        contract_registry: Optional[ContractRegistry] = None,
+        phase_payload_builders: Optional[Dict[str, Callable[[Task], Dict]]] = None,
+        verification_runner: Optional[VerificationRunner] = None,
+        approval_manager: Optional[ApprovalManager] = None,
+        audit_logger: Optional[AuditLogger] = None,
+        provenance_bundler: Optional[ProvenanceBundler] = None,
+        resilience_manager: Optional[ResilienceManager] = None,
+    ) -> None:
+        self.queue = queue
+        self.state_store = state_store
+        self.phase_handlers = phase_handlers or {}
+        self.policy_context_resolver = policy_context_resolver or self._default_policy_context
+        self.versioning_agent = versioning_agent
+        self.base_branch = base_branch
+        self.tool_runner = tool_runner
+        self.execute_tool_name = execute_tool_name
+        self.contract_registry = contract_registry
+        self.phase_payload_builders = phase_payload_builders or {}
+        self.verification_runner = verification_runner
+        self.approval_manager = approval_manager
+        self.audit_logger = audit_logger
+        self.provenance_bundler = provenance_bundler
+        self.resilience_manager = resilience_manager
+        self.phase_order = phase_order or [
+            "intent",
+            "triage",
+            "requirements",
+            "versioning",
+            "plan",
+            "code",
+            "test",
+            "review",
+            "docs",
+            "execute",
+            "verify",
+            "human_checkpoints",
+            "gate_pre_merge",
+            "finalize",
+        ]
+
+    def create_task(
+        self,
+        prompt: str,
+        priority: str = "interactive",
+        execution_mode: str = "normal",
+    ) -> Task:
+        task_id = uuid.uuid4().hex[:12]
+        task = Task(
+            task_id=task_id,
+            prompt=prompt,
+            priority=priority,
+            created_at=time.time(),
+            execution_mode=execution_mode,
+        )
+        self.queue.enqueue(task)
+        self.state_store.save_task(task)
+        self._emit_audit(
+            "task_created",
+            task,
+            {
+                "priority": task.priority,
+                "trusted_context": task.trusted_context,
+                "execution_mode": task.execution_mode,
+            },
+        )
+        return task
+
+    def process_next(self) -> Optional[Task]:
+        task = self.queue.dequeue()
+        if task is None:
+            return None
+
+        task.status = "in_progress"
+        self.state_store.save_task(task)
+        self._emit_audit("task_started", task, {"phase_count": len(self.phase_order)})
+
+        start_time = time.time()
+        for phase in self.phase_order:
+            result = self._run_phase_with_resilience(task, phase)
+            task.phase_history.append(result)
+            self.state_store.save_task(task)
+            self._emit_audit(
+                "phase_result",
+                task,
+                {
+                    "phase": result.phase,
+                    "status": result.status,
+                    "detail": result.detail,
+                },
+            )
+            if result.status != "success":
+                task.status = "blocked"
+                self._write_provenance_bundle(task, outcome="blocked")
+                self.state_store.save_task(task)
+                self._emit_audit(
+                    "task_blocked",
+                    task,
+                    {"blocked_phase": result.phase, "detail": result.detail},
+                )
+                return task
+
+            budget_failures = self._check_budget(task, start_time)
+            if budget_failures:
+                task.status = "blocked"
+                detail = f"budget exceeded: {', '.join(budget_failures)}"
+                budget_result = PhaseResult(
+                    phase="budget",
+                    status="failed",
+                    detail=detail,
+                    timestamp=time.time(),
+                )
+                task.phase_history.append(budget_result)
+                self._emit_audit("budget_block", task, {"failures": budget_failures})
+                self._write_provenance_bundle(task, outcome="blocked")
+                self.state_store.save_task(task)
+                return task
+
+        task.status = "completed"
+        self._write_provenance_bundle(task, outcome="completed")
+        self.state_store.save_task(task)
+        self._emit_audit("task_completed", task, {"phase_count": len(task.phase_history)})
+        return task
+
+    def run_prompt(
+        self, prompt: str, priority: str = "interactive", dry_run: bool = False
+    ) -> Task:
+        mode = "dry_run" if dry_run else "normal"
+        self.create_task(prompt=prompt, priority=priority, execution_mode=mode)
+        task = self.process_next()
+        assert task is not None
+        return task
+
+    def replay_from_bundle(self, bundle_path: str | Path) -> Task:
+        path = Path(bundle_path)
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        material = raw.get("material", {})
+        task_payload = material.get("task", {})
+        phase_history = [
+            PhaseResult(
+                phase=item["phase"],
+                status=item["status"],
+                detail=item["detail"],
+                timestamp=item["timestamp"],
+            )
+            for item in task_payload.get("phase_history", [])
+        ]
+        task = Task(
+            task_id=task_payload.get("task_id", "replay"),
+            prompt=task_payload.get("prompt", ""),
+            priority=task_payload.get("priority", "interactive"),
+            created_at=task_payload.get("created_at", time.time()),
+            work_branch=task_payload.get("work_branch"),
+            trusted_context=task_payload.get("trusted_context", True),
+            agent_outputs=task_payload.get("agent_outputs", {}),
+            handoff_artifacts=task_payload.get("handoff_artifacts", {}),
+            provenance_bundle_path=str(path),
+            execution_mode="replay",
+            replay_source=str(path),
+            degraded_mode=task_payload.get("degraded_mode", False),
+            safe_mode=task_payload.get("safe_mode", False),
+            failure_count=task_payload.get("failure_count", 0),
+            tool_calls=task_payload.get("tool_calls", 0),
+            status="replayed",
+            phase_history=phase_history,
+        )
+        self.state_store.save_task(task)
+        self._emit_audit(
+            "task_replayed",
+            task,
+            {"source": str(path), "phase_count": len(task.phase_history)},
+        )
+        return task
+
+    def _run_phase_with_resilience(self, task: Task, phase: str) -> PhaseResult:
+        while True:
+            if self.resilience_manager is not None:
+                attempt_no = self.resilience_manager.record_phase_attempt(task.task_id, phase)
+                self._emit_audit(
+                    "phase_attempt",
+                    task,
+                    {"phase": phase, "attempt": attempt_no},
+                )
+
+            result = self._run_phase(phase, task)
+            if result.status == "success":
+                contract_result = self._validate_phase_handoff(phase, task)
+                if contract_result is None:
+                    return result
+                result = contract_result
+
+            if self.resilience_manager is None:
+                return result
+
+            task.failure_count = self.resilience_manager.record_failure(task.task_id)
+            self._emit_audit(
+                "phase_failure",
+                task,
+                {
+                    "phase": phase,
+                    "detail": result.detail,
+                    "failure_count": task.failure_count,
+                },
+            )
+
+            if self.resilience_manager.should_enter_safe_mode(task.task_id):
+                task.safe_mode = True
+                return PhaseResult(
+                    phase=phase,
+                    status="failed",
+                    detail=f"safe mode engaged after repeated failures: {result.detail}",
+                    timestamp=time.time(),
+                )
+
+            if self.resilience_manager.retry_allowed(task.task_id, phase):
+                continue
+
+            if self.resilience_manager.fallback_allowed(phase, task.degraded_mode):
+                task.degraded_mode = True
+                self._emit_audit(
+                    "phase_fallback",
+                    task,
+                    {"phase": phase, "reason": result.detail},
+                )
+                return PhaseResult(
+                    phase=phase,
+                    status="success",
+                    detail=f"fallback path used for {phase}",
+                    timestamp=time.time(),
+                )
+
+            return result
+
+    def _run_phase(self, phase: str, task: Task) -> PhaseResult:
+        if phase == "versioning":
+            return self._run_versioning_phase(task)
+        if phase == "execute":
+            guard = self._guard_execute_branch(task)
+            if not guard.ok:
+                return PhaseResult(
+                    phase="execute",
+                    status="failed",
+                    detail=guard.detail,
+                    timestamp=time.time(),
+                )
+            return self._run_execute_phase(task)
+        if phase == "verify":
+            return self._run_verify_phase(task)
+        if phase == "human_checkpoints":
+            return self._run_human_checkpoints_phase(task)
+        if phase == "gate_pre_merge":
+            return self._run_pre_merge_gate(task)
+
+        handler = self.phase_handlers.get(phase)
+        if handler:
+            return handler(task)
+        return PhaseResult(
+            phase=phase,
+            status="success",
+            detail=f"stub phase {phase} completed",
+            timestamp=time.time(),
+        )
+
+    def _run_execute_phase(self, task: Task) -> PhaseResult:
+        if task.execution_mode == "dry_run":
+            return PhaseResult(
+                phase="execute",
+                status="success",
+                detail="dry-run execute simulation (no tool call)",
+                timestamp=time.time(),
+            )
+        if task.safe_mode:
+            return PhaseResult(
+                phase="execute",
+                status="failed",
+                detail="safe mode blocks execute phase",
+                timestamp=time.time(),
+            )
+        if self.tool_runner is None:
+            return PhaseResult(
+                phase="execute",
+                status="success",
+                detail="execute stub completed (no tool runner configured)",
+                timestamp=time.time(),
+            )
+
+        # Prefer concrete file edits emitted by the coder agent.
+        code_payload = task.agent_outputs.get("code", {})
+        file_edits = self._extract_file_edits(code_payload)
+        if file_edits:
+            applied = 0
+            for edit in file_edits:
+                request = ToolRequest(
+                    tool="repo.write",
+                    params={
+                        "path": edit["path"],
+                        "content": edit["content"],
+                    },
+                    trusted=task.trusted_context,
+                    human_approved=False,
+                )
+                result = self.tool_runner.run(request)
+                task.tool_calls += 1
+                if not result.ok:
+                    return PhaseResult(
+                        phase="execute",
+                        status="failed",
+                        detail=result.detail,
+                        timestamp=time.time(),
+                    )
+                applied += 1
+            return PhaseResult(
+                phase="execute",
+                status="success",
+                detail=f"applied {applied} file edit(s)",
+                timestamp=time.time(),
+            )
+
+        request = ToolRequest(
+            tool=self.execute_tool_name,
+            params={"query": task.prompt},
+            trusted=task.trusted_context,
+            human_approved=False,
+        )
+        result = self.tool_runner.run(request)
+        task.tool_calls += 1
+        if not result.ok:
+            return PhaseResult(
+                phase="execute",
+                status="failed",
+                detail=result.detail,
+                timestamp=time.time(),
+            )
+        return PhaseResult(
+            phase="execute",
+            status="success",
+            detail=result.detail,
+            timestamp=time.time(),
+        )
+
+    def _run_verify_phase(self, task: Task) -> PhaseResult:
+        if self.verification_runner is None:
+            return PhaseResult(
+                phase="verify",
+                status="success",
+                detail="verify stub completed (no verification runner configured)",
+                timestamp=time.time(),
+            )
+
+        checks = self._extract_checks_to_run(task.agent_outputs.get("test", {}))
+        result = self.verification_runner.run(checks=checks)
+        task.agent_outputs["verify"] = {
+            "checks": result.checks,
+            "status": result.status,
+            "flaky_quarantined": result.flaky_quarantined,
+            "retry_counts": result.retry_counts,
+        }
+        if result.status == "pass":
+            return PhaseResult(
+                phase="verify",
+                status="success",
+                detail=(
+                    "verification passed"
+                    if not result.flaky_quarantined
+                    else f"verification passed with quarantined checks: {', '.join(result.flaky_quarantined)}"
+                ),
+                timestamp=time.time(),
+            )
+        return PhaseResult(
+            phase="verify",
+            status="failed",
+            detail=f"verification failed checks: {', '.join(result.failures)}",
+            timestamp=time.time(),
+        )
+
+    @staticmethod
+    def _extract_file_edits(code_payload: Dict) -> List[Dict[str, str]]:
+        raw = code_payload.get("file_edits")
+        if not isinstance(raw, list):
+            return []
+        edits: List[Dict[str, str]] = []
+        for item in raw:
+            if not isinstance(item, dict):
+                continue
+            path_value = item.get("path")
+            content_value = item.get("content")
+            if not isinstance(path_value, str) or not path_value.strip():
+                continue
+            if not isinstance(content_value, str):
+                continue
+            edits.append({"path": path_value.strip(), "content": content_value})
+        return edits
+
+    @staticmethod
+    def _extract_checks_to_run(test_payload: Dict) -> Optional[List[str]]:
+        raw = test_payload.get("checks_to_run")
+        if not isinstance(raw, list):
+            return None
+        checks = [item.strip() for item in raw if isinstance(item, str) and item.strip()]
+        return checks or None
+
+    def _run_versioning_phase(self, task: Task) -> PhaseResult:
+        if task.execution_mode == "dry_run":
+            task.work_branch = f"codex/{task.task_id}-dry-run"
+            return PhaseResult(
+                phase="versioning",
+                status="success",
+                detail=f"dry-run versioning simulation {task.work_branch}",
+                timestamp=time.time(),
+            )
+        if self.versioning_agent is None:
+            task.work_branch = f"codex/{task.task_id}-task"
+            return PhaseResult(
+                phase="versioning",
+                status="success",
+                detail=f"versioning stub assigned {task.work_branch}",
+                timestamp=time.time(),
+            )
+
+        result = self.versioning_agent.create_branch_for_task(
+            task_id=task.task_id,
+            prompt=task.prompt,
+            base_branch=self.base_branch,
+        )
+        if not result.ok:
+            return PhaseResult(
+                phase="versioning",
+                status="failed",
+                detail=result.detail,
+                timestamp=time.time(),
+            )
+        task.work_branch = result.branch
+        return PhaseResult(
+            phase="versioning",
+            status="success",
+            detail=result.detail,
+            timestamp=time.time(),
+        )
+
+    def _guard_execute_branch(self, task: Task) -> VersioningResult:
+        if task.execution_mode == "dry_run":
+            return VersioningResult(
+                ok=True,
+                detail="dry-run mode skips protected-branch guard",
+                branch=task.work_branch,
+            )
+        if self.versioning_agent is None:
+            return VersioningResult(
+                ok=True, detail="no versioning agent configured", branch=None
+            )
+        return self.versioning_agent.ensure_not_protected_branch()
+
+    def _run_pre_merge_gate(self, task: Task) -> PhaseResult:
+        if self.approval_manager is not None:
+            ensure = self.approval_manager.ensure_required()
+            if not ensure.ok:
+                return PhaseResult(
+                    phase="gate_pre_merge",
+                    status="failed",
+                    detail=ensure.detail,
+                    timestamp=time.time(),
+                )
+
+        ctx = self.policy_context_resolver(task)
+        result = evaluate_pre_merge(ctx)
+        if result.allowed:
+            return PhaseResult(
+                phase="gate_pre_merge",
+                status="success",
+                detail="pre-merge gate passed",
+                timestamp=time.time(),
+            )
+        return PhaseResult(
+            phase="gate_pre_merge",
+            status="failed",
+            detail=f"pre-merge gate failed: {', '.join(result.failures)}",
+            timestamp=time.time(),
+        )
+
+    def _run_human_checkpoints_phase(self, task: Task) -> PhaseResult:
+        if self.approval_manager is None:
+            task.agent_outputs["human_checkpoints"] = {
+                "approved": True,
+                "missing": [],
+            }
+            return PhaseResult(
+                phase="human_checkpoints",
+                status="success",
+                detail="human checkpoint stub completed (no approval manager configured)",
+                timestamp=time.time(),
+            )
+
+        missing = self.approval_manager.missing_required()
+        task.agent_outputs["human_checkpoints"] = {
+            "approved": len(missing) == 0,
+            "missing": missing,
+        }
+        if missing:
+            return PhaseResult(
+                phase="human_checkpoints",
+                status="failed",
+                detail=f"missing required approvals: {', '.join(missing)}",
+                timestamp=time.time(),
+            )
+        return PhaseResult(
+            phase="human_checkpoints",
+            status="success",
+            detail="required approvals present",
+            timestamp=time.time(),
+        )
+
+    def _validate_phase_handoff(self, phase: str, task: Task) -> Optional[PhaseResult]:
+        if self.contract_registry is None:
+            return None
+
+        payload = self._build_phase_payload(phase, task)
+        validation = self.contract_registry.validate(phase, payload)
+        if not validation.valid:
+            return PhaseResult(
+                phase=phase,
+                status="failed",
+                detail=f"handoff schema validation failed: {'; '.join(validation.errors)}",
+                timestamp=time.time(),
+            )
+
+        task.handoff_artifacts[phase] = payload
+        return None
+
+    def _build_phase_payload(self, phase: str, task: Task) -> Dict:
+        if phase in task.agent_outputs:
+            return task.agent_outputs[phase]
+        builder = self.phase_payload_builders.get(phase)
+        if builder is not None:
+            return builder(task)
+        return self._default_phase_payload(phase, task)
+
+    def _default_phase_payload(self, phase: str, task: Task) -> Dict:
+        if phase == "intent":
+            return {
+                "rewritten_prompt": task.prompt,
+                "target_files": [],
+                "success_criteria": [],
+            }
+        if phase == "triage":
+            return {
+                "task_type": "bug",
+                "risk_level": "low",
+                "scope_size": "small",
+                "intensity": "normal",
+            }
+        if phase == "requirements":
+            return {
+                "acceptance_criteria": ["placeholder acceptance criteria"],
+                "non_goals": [],
+                "open_questions": [],
+            }
+        if phase == "versioning":
+            return {"work_branch": task.work_branch or ""}
+        if phase == "plan":
+            return {
+                "steps": ["stub plan step"],
+                "test_plan": ["run deterministic checks"],
+                "risk_notes": [],
+            }
+        if phase == "code":
+            return {
+                "changes": ["stub code change"],
+                "files_touched": ["README.md"],
+            }
+        if phase == "test":
+            return {
+                "tests_added": ["tests/test_stub.py"],
+                "checks_to_run": ["unit"],
+            }
+        if phase == "review":
+            return {
+                "findings": [],
+                "risk_summary": "low risk",
+                "required_fixes": [],
+            }
+        if phase == "docs":
+            return {
+                "changelog": "updated",
+                "runbook_delta": "none",
+                "migration_notes": "none",
+            }
+        if phase == "execute":
+            tool_name = self.execute_tool_name if self.tool_runner else "stub.execute"
+            return {
+                "changes": ["stub change applied"],
+                "tools_used": [tool_name],
+            }
+        if phase == "verify":
+            return {
+                "checks": ["lint", "unit"],
+                "status": "pass",
+            }
+        if phase == "gate_pre_merge":
+            return {"allowed": True, "failures": []}
+        if phase == "human_checkpoints":
+            return {"approved": True, "missing": []}
+        if phase == "finalize":
+            return {"outcome": "completed", "summary": "task finalized"}
+        return {"phase": phase}
+
+    @staticmethod
+    def _default_policy_context(_: Task) -> PolicyContext:
+        return PolicyContext(
+            requirements_clear=True,
+            architecture_required=False,
+            architecture_approved=True,
+            ci_full_passed=True,
+            security_passed=True,
+            qa_passed=True,
+            perf_passed=True,
+            review_passed=True,
+            docs_passed=True,
+            human_merge_approval=True,
+            branch_up_to_date=True,
+            post_deploy_smoke_passed=True,
+            slo_healthy=True,
+            alerts_healthy=True,
+        )
+
+    def _emit_audit(self, event_type: str, task: Task, payload: Dict) -> None:
+        if self.audit_logger is None:
+            return
+        self.audit_logger.emit(event_type=event_type, task_id=task.task_id, payload=payload)
+
+    def _write_provenance_bundle(self, task: Task, outcome: str) -> None:
+        if self.provenance_bundler is None:
+            return
+        path = self.provenance_bundler.write_bundle(
+            task_id=task.task_id,
+            task_payload=asdict(task),
+            outcome=outcome,
+        )
+        task.provenance_bundle_path = str(path)
+
+    def _check_budget(self, task: Task, start_time: float) -> List[str]:
+        if self.resilience_manager is None:
+            return []
+        elapsed = time.time() - start_time
+        return self.resilience_manager.budget_exceeded(
+            task_id=task.task_id,
+            elapsed_seconds=elapsed,
+            tool_calls=task.tool_calls,
+        )

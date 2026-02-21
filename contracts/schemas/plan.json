@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["steps", "test_plan", "risk_notes"],
+  "properties": {
+    "steps": {"type": "array", "items": {"type": "string"}},
+    "test_plan": {"type": "array", "items": {"type": "string"}},
+    "risk_notes": {"type": "array", "items": {"type": "string"}}
+  }
+}

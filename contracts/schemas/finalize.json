@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["outcome", "summary"],
+  "properties": {
+    "outcome": {"type": "string"},
+    "summary": {"type": "string"}
+  }
+}

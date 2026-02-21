@@ -1,0 +1,6 @@
+{
+  "max_retries": 1,
+  "quarantine_after_failures": 2,
+  "require_owner": true,
+  "require_expiry": true
+}

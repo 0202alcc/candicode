@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["event_type", "timestamp", "phase", "detail", "level"],
+  "properties": {
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "plan",
+        "decision",
+        "tool_call",
+        "tool_result",
+        "reasoning_summary",
+        "gate",
+        "status"
+      ]
+    },
+    "timestamp": {"type": "number"},
+    "phase": {"type": "string"},
+    "detail": {"type": "string"},
+    "level": {"type": "string", "enum": ["info", "warn", "error"]}
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["rewritten_prompt", "target_files", "success_criteria"],
+  "properties": {
+    "rewritten_prompt": {"type": "string"},
+    "target_files": {"type": "array", "items": {"type": "string"}},
+    "success_criteria": {"type": "array", "items": {"type": "string"}},
+    "proposed_new_files": {"type": "array", "items": {"type": "string"}}
+  }
+}

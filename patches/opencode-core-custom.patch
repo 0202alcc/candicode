@@ -1,0 +1,300 @@
+diff --git a/packages/opencode/src/cli/logo.ts b/packages/opencode/src/cli/logo.ts
+index 44fb93c15..9a494b860 100644
+--- a/packages/opencode/src/cli/logo.ts
++++ b/packages/opencode/src/cli/logo.ts
+@@ -1,6 +1,6 @@
+ export const logo = {
+-  left: ["                   ", "█▀▀█ █▀▀█ █▀▀█ █▀▀▄", "█__█ █__█ █^^^ █__█", "▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀~~▀"],
+-  right: ["             ▄     ", "█▀▀▀ █▀▀█ █▀▀█ █▀▀█", "█___ █__█ █__█ █^^^", "▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"],
++  left: ["candicode"],
++  right: [""],
+ }
+ 
+ export const marks = "_^~"
+diff --git a/packages/opencode/src/cli/ui.ts b/packages/opencode/src/cli/ui.ts
+index f242a77f6..dfccfccdb 100644
+--- a/packages/opencode/src/cli/ui.ts
++++ b/packages/opencode/src/cli/ui.ts
+@@ -4,6 +4,7 @@ import { NamedError } from "@opencode-ai/util/error"
+ import { logo as glyphs } from "./logo"
+ 
+ export namespace UI {
++  export const APP_NAME = "candicode"
+   export const CancelledError = NamedError.create("UICancelledError", z.void())
+ 
+   export const Style = {
+diff --git a/packages/opencode/src/index.ts b/packages/opencode/src/index.ts
+index 655156588..ec70000e7 100644
+--- a/packages/opencode/src/index.ts
++++ b/packages/opencode/src/index.ts
+@@ -47,7 +47,7 @@ process.on("uncaughtException", (e) => {
+ 
+ const cli = yargs(hideBin(process.argv))
+   .parserConfiguration({ "populate--": true })
+-  .scriptName("opencode")
++  .scriptName(UI.APP_NAME)
+   .wrap(100)
+   .help("help", "show help")
+   .alias("help", "h")
+@@ -76,7 +76,7 @@ const cli = yargs(hideBin(process.argv))
+     process.env.AGENT = "1"
+     process.env.OPENCODE = "1"
+ 
+-    Log.Default.info("opencode", {
++    Log.Default.info(UI.APP_NAME, {
+       version: Installation.VERSION,
+       args: process.argv.slice(2),
+     })
+diff --git a/packages/opencode/src/session/prompt.ts b/packages/opencode/src/session/prompt.ts
+index 75bd3c9df..b1c41bb63 100644
+--- a/packages/opencode/src/session/prompt.ts
++++ b/packages/opencode/src/session/prompt.ts
+@@ -45,6 +45,7 @@ import { LLM } from "./llm"
+ import { iife } from "@/util/iife"
+ import { Shell } from "@/shell/shell"
+ import { Truncate } from "@/tool/truncation"
++import { Auth } from "@/auth"
+ 
+ // @ts-ignore
+ globalThis.AI_SDK_LOG_WARNINGS = false
+@@ -181,9 +182,240 @@ export namespace SessionPrompt {
+       return message
+     }
+ 
++    if (useExternalPipeline()) {
++      return await externalPromptResponse(input, message)
++    }
++
+     return loop({ sessionID: input.sessionID })
+   })
+ 
++  function useExternalPipeline() {
++    return !!process.env.OPENCODE_PIPELINE_ENTRYPOINT
++  }
++
++  async function externalPromptResponse(input: PromptInput, user: MessageV2.WithParts): Promise<MessageV2.WithParts> {
++    const entry = process.env.OPENCODE_PIPELINE_ENTRYPOINT
++    if (!entry) return loop({ sessionID: input.sessionID })
++
++    const promptText = extractPromptText(input.parts)
++    const selectedModel = user.info.role === "user" ? user.info.model : input.model
++    const cmd = [entry, promptText]
++    if (selectedModel) {
++      cmd.push("--provider-id", selectedModel.providerID)
++      cmd.push("--model-id", selectedModel.modelID)
++    }
++    const env = { ...process.env }
++    if (selectedModel) {
++      env.OPENCODE_LLM_PROVIDER = selectedModel.providerID
++      env.OPENCODE_LLM_MODEL = selectedModel.modelID
++      const key = await providerCredentialForPipeline(selectedModel.providerID)
++      if (key) {
++        env[providerApiKeyEnv(selectedModel.providerID)] = key
++      }
++      const model = await Provider.getModel(selectedModel.providerID, selectedModel.modelID).catch(() => undefined)
++      const baseURL = model?.api?.url
++      if (baseURL) {
++        env.OPENCODE_LLM_BASE_URL = baseURL
++        env[providerBaseUrlEnv(selectedModel.providerID)] = baseURL
++      }
++      if (selectedModel.providerID.startsWith("opencode")) {
++        env[providerHeadersJsonEnv(selectedModel.providerID)] = JSON.stringify({
++          "x-opencode-project": Instance.project.id,
++          "x-opencode-session": input.sessionID,
++          "x-opencode-request": user.info.id,
++          "x-opencode-client": process.env.OPENCODE_CLIENT ?? "cli",
++          "User-Agent": `opencode/${process.env.npm_package_version ?? "custom"}`,
++        })
++      }
++    }
++    const proc = Bun.spawn({
++      cmd,
++      cwd: Instance.directory,
++      env,
++      stdout: "pipe",
++      stderr: "pipe",
++    })
++    const timeoutMs = Math.max(1000, Number(process.env.OPENCODE_PIPELINE_TIMEOUT_MS ?? "120000"))
++    const [stdout, stderr, exit] = await Promise.all([
++      new Response(proc.stdout).text(),
++      new Response(proc.stderr).text(),
++      (async () => {
++        let timer: Timer | undefined
++        try {
++          return await Promise.race<
++            { kind: "exit"; code: number } | { kind: "timeout" }
++          >([
++            proc.exited.then((code) => ({ kind: "exit", code })),
++            new Promise((resolve) => {
++              timer = setTimeout(() => resolve({ kind: "timeout" as const }), timeoutMs)
++            }),
++          ])
++        } finally {
++          if (timer) clearTimeout(timer)
++        }
++      })(),
++    ])
++    if (exit.kind === "timeout") {
++      proc.kill()
++      throw new Error(`external pipeline timed out after ${timeoutMs}ms`)
++    }
++    const code = exit.code
++    if (code !== 0) {
++      throw new Error(
++        `external pipeline failed (exit ${code})${stderr ? `: ${stderr.trim()}` : ""}`,
++      )
++    }
++
++    const parsed = parseExternalResponse(stdout)
++    const model = user.info.role === "user" ? user.info.model : { providerID: "unknown", modelID: "unknown" }
++    const agent = user.info.role === "user" ? user.info.agent : input.agent ?? "build"
++    const variant = user.info.role === "user" ? user.info.variant : undefined
++
++    const assistant: MessageV2.Assistant = {
++      id: Identifier.ascending("message"),
++      sessionID: input.sessionID,
++      parentID: user.info.id,
++      mode: agent,
++      agent,
++      cost: 0,
++      path: {
++        cwd: Instance.directory,
++        root: Instance.worktree,
++      },
++      time: {
++        created: Date.now(),
++        completed: Date.now(),
++      },
++      role: "assistant",
++      tokens: {
++        input: 0,
++        output: 0,
++        reasoning: 0,
++        cache: { read: 0, write: 0 },
++      },
++      modelID: model.modelID,
++      providerID: model.providerID,
++      finish: "stop",
++      ...(variant ? { variant } : {}),
++    }
++    await Session.updateMessage(assistant)
++
++    const textPart: MessageV2.TextPart = {
++      type: "text",
++      id: Identifier.ascending("part"),
++      messageID: assistant.id,
++      sessionID: input.sessionID,
++      text: [
++        `[pipeline] status=${parsed.status} phase=${parsed.final_phase}`,
++        formatPipelineProgress(parsed.phase_history, parsed.phase_agent_map),
++        parsed.final_detail,
++        parsed.provenance_bundle_path
++          ? `provenance: ${parsed.provenance_bundle_path}`
++          : undefined,
++      ]
++        .filter(Boolean)
++        .join("\n"),
++      synthetic: true,
++      time: {
++        start: Date.now(),
++        end: Date.now(),
++      },
++    }
++    await Session.updatePart(textPart)
++    return { info: assistant, parts: [textPart] }
++  }
++
++  async function providerCredentialForPipeline(providerID: string): Promise<string | undefined> {
++    const auth = await Auth.get(providerID)
++    if (!auth) return undefined
++    if (auth.type === "api") return auth.key
++    if (auth.type === "oauth") return auth.access
++    if (auth.type === "wellknown") return auth.key
++    return undefined
++  }
++
++  function providerApiKeyEnv(providerID: string): string {
++    const normalized = providerID.replace(/[^a-zA-Z0-9]+/g, "_").toUpperCase()
++    return `OPENCODE_PROVIDER_${normalized}_API_KEY`
++  }
++
++  function providerBaseUrlEnv(providerID: string): string {
++    const normalized = providerID.replace(/[^a-zA-Z0-9]+/g, "_").toUpperCase()
++    return `OPENCODE_PROVIDER_${normalized}_BASE_URL`
++  }
++
++  function providerHeadersJsonEnv(providerID: string): string {
++    const normalized = providerID.replace(/[^a-zA-Z0-9]+/g, "_").toUpperCase()
++    return `OPENCODE_PROVIDER_${normalized}_HEADERS_JSON`
++  }
++
++  function extractPromptText(parts: PromptInput["parts"]): string {
++    return parts
++      .map((part) => {
++        if (part.type === "text") return part.text
++        if (part.type === "agent") return `@${part.name}`
++        if (part.type === "file") return part.filename ? `file:${part.filename}` : part.url
++        if (part.type === "subtask") return part.prompt
++        return ""
++      })
++      .filter(Boolean)
++      .join("\n")
++      .trim()
++  }
++
++  function parseExternalResponse(stdout: string): {
++    status: string
++    final_phase: string
++    final_detail: string
++    provenance_bundle_path?: string | null
++    phase_history?: { phase: string; status: string; detail: string; timestamp?: number }[]
++    phase_agent_map?: Record<string, string>
++  } {
++    try {
++      const parsed = JSON.parse(stdout.trim())
++      const phaseHistory = Array.isArray(parsed.phase_history)
++        ? parsed.phase_history
++            .filter((item: any) => item && typeof item === "object")
++            .map((item: any) => ({
++              phase: String(item.phase ?? "unknown"),
++              status: String(item.status ?? "unknown"),
++              detail: String(item.detail ?? ""),
++              ...(typeof item.timestamp === "number" ? { timestamp: item.timestamp } : {}),
++            }))
++        : undefined
++      const phaseAgentMap =
++        parsed.phase_agent_map && typeof parsed.phase_agent_map === "object" ? parsed.phase_agent_map : undefined
++      return {
++        status: String(parsed.status ?? "unknown"),
++        final_phase: String(parsed.final_phase ?? "unknown"),
++        final_detail: String(parsed.final_detail ?? ""),
++        provenance_bundle_path:
++          parsed.provenance_bundle_path === undefined
++            ? undefined
++            : parsed.provenance_bundle_path,
++        phase_history: phaseHistory,
++        phase_agent_map: phaseAgentMap,
++      }
++    } catch (error) {
++      throw new Error(
++        `external pipeline returned invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
++      )
++    }
++  }
++
++  function formatPipelineProgress(
++    phaseHistory?: { phase: string; status: string; detail: string }[],
++    phaseAgentMap?: Record<string, string>,
++  ): string | undefined {
++    if (!phaseHistory || phaseHistory.length === 0) return undefined
++    const lines = ["pipeline progress:"]
++    for (const item of phaseHistory) {
++      const agent = phaseAgentMap?.[item.phase] ?? "unmapped"
++      lines.push(`- ${item.phase} [${item.status}] agent=${agent}`)
++    }
++    return lines.join("\n")
++  }
++
+   export async function resolvePromptParts(template: string): Promise<PromptInput["parts"]> {
+     const parts: PromptInput["parts"] = [
+       {

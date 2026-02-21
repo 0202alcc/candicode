@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_type", "risk_level", "scope_size", "intensity"],
+  "properties": {
+    "task_type": {"type": "string"},
+    "risk_level": {"type": "string", "enum": ["low", "medium", "high"]},
+    "scope_size": {"type": "string", "enum": ["small", "medium", "large"]},
+    "intensity": {"type": "string", "enum": ["fast", "normal", "deep"]}
+  }
+}

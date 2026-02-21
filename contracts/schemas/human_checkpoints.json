@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["approved", "missing"],
+  "properties": {
+    "approved": {"type": "boolean"},
+    "missing": {"type": "array", "items": {"type": "string"}}
+  }
+}

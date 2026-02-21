@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["changes", "files_touched"],
+  "properties": {
+    "changes": {"type": "array", "items": {"type": "string"}},
+    "files_touched": {"type": "array", "items": {"type": "string"}},
+    "file_edits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "content"],
+        "properties": {
+          "path": {"type": "string"},
+          "content": {"type": "string"}
+        }
+      }
+    }
+  }
+}

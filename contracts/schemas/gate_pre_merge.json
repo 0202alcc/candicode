@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["allowed", "failures"],
+  "properties": {
+    "allowed": {"type": "boolean"},
+    "failures": {"type": "array", "items": {"type": "string"}}
+  }
+}

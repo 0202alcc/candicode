@@ -1,0 +1,183 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "global_policy",
+    "branching",
+    "agents",
+    "routing",
+    "gates",
+    "human_checkpoints"
+  ],
+  "properties": {
+    "version": {
+      "type": "string"
+    },
+    "global_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "default_mode",
+        "user_override_intensity",
+        "protected_branches",
+        "direct_commit_to_main",
+        "required_human_merge_approval"
+      ],
+      "properties": {
+        "default_mode": {
+          "type": "string",
+          "enum": ["fast", "normal", "deep"]
+        },
+        "user_override_intensity": {
+          "type": "boolean"
+        },
+        "protected_branches": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "direct_commit_to_main": {
+          "type": "boolean"
+        },
+        "required_human_merge_approval": {
+          "type": "boolean"
+        }
+      }
+    },
+    "branching": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "branch_name_template",
+        "base_branch",
+        "rebase_before_merge"
+      ],
+      "properties": {
+        "branch_name_template": {
+          "type": "string"
+        },
+        "base_branch": {
+          "type": "string"
+        },
+        "rebase_before_merge": {
+          "type": "boolean"
+        }
+      }
+    },
+    "agents": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "type", "responsibilities"],
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "enum": ["local", "llm"]
+          },
+          "responsibilities": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "routing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["intensity"],
+      "properties": {
+        "intensity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fast", "normal", "deep"],
+          "properties": {
+            "fast": {
+              "$ref": "#/$defs/intensityPolicy"
+            },
+            "normal": {
+              "$ref": "#/$defs/intensityPolicy"
+            },
+            "deep": {
+              "$ref": "#/$defs/intensityPolicy"
+            }
+          }
+        }
+      }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required_pre_merge", "required_pre_rollout"],
+      "properties": {
+        "required_pre_merge": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "required_pre_rollout": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "human_checkpoints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "optional"],
+      "properties": {
+        "required": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "optional": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "intensityPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model_profile", "context_budget", "gates"],
+      "properties": {
+        "model_profile": {
+          "type": "string"
+        },
+        "context_budget": {
+          "type": "string",
+          "enum": ["low", "medium", "high"]
+        },
+        "gates": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

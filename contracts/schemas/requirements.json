@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["acceptance_criteria", "non_goals", "open_questions"],
+  "properties": {
+    "acceptance_criteria": {"type": "array", "items": {"type": "string"}},
+    "non_goals": {"type": "array", "items": {"type": "string"}},
+    "open_questions": {"type": "array", "items": {"type": "string"}}
+  }
+}

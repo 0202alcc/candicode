@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["findings", "risk_summary", "required_fixes"],
+  "properties": {
+    "findings": {"type": "array", "items": {"type": "string"}},
+    "risk_summary": {"type": "string"},
+    "required_fixes": {"type": "array", "items": {"type": "string"}}
+  }
+}

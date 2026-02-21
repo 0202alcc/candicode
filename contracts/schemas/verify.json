@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["checks", "status"],
+  "properties": {
+    "checks": {"type": "array", "items": {"type": "string"}},
+    "status": {"type": "string", "enum": ["pass", "fail"]},
+    "flaky_quarantined": {"type": "array", "items": {"type": "string"}},
+    "retry_counts": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "integer"
+      }
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tests_added", "checks_to_run"],
+  "properties": {
+    "tests_added": {"type": "array", "items": {"type": "string"}},
+    "checks_to_run": {"type": "array", "items": {"type": "string"}}
+  }
+}

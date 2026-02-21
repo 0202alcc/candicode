@@ -1,0 +1,9 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["changes", "tools_used"],
+  "properties": {
+    "changes": {"type": "array", "items": {"type": "string"}},
+    "tools_used": {"type": "array", "items": {"type": "string"}}
+  }
+}

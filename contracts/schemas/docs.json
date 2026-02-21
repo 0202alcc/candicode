@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["changelog", "runbook_delta", "migration_notes"],
+  "properties": {
+    "changelog": {"type": "string"},
+    "runbook_delta": {"type": "string"},
+    "migration_notes": {"type": "string"}
+  }
+}

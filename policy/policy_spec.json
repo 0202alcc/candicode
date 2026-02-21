@@ -1,0 +1,26 @@
+{
+  "gates": {
+    "pre_merge_required": [
+      "requirements_clear",
+      "architecture_approval_if_required",
+      "ci_full",
+      "security",
+      "qa_matrix",
+      "perf_budget",
+      "review",
+      "docs",
+      "human_merge_approval",
+      "branch_up_to_date"
+    ],
+    "pre_rollout_required": [
+      "post_deploy_smoke",
+      "slo_health",
+      "alert_health"
+    ]
+  },
+  "auto_rollback_triggers": [
+    "post_deploy_smoke_failed",
+    "slo_breach",
+    "alert_health_failed"
+  ]
+}

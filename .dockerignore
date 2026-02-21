@@ -1,0 +1,9 @@
+.git
+opencode-core
+.opencode-pipeline
+runtime
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.DS_Store

@@ -1,0 +1,107 @@
+{
+  "version": "1.0",
+  "global_policy": {
+    "default_mode": "normal",
+    "user_override_intensity": true,
+    "protected_branches": ["main"],
+    "direct_commit_to_main": false,
+    "required_human_merge_approval": true
+  },
+  "branching": {
+    "branch_name_template": "codex/{task_id}-{slug}",
+    "base_branch": "main",
+    "rebase_before_merge": true
+  },
+  "agents": [
+    {
+      "name": "supervisor",
+      "type": "local",
+      "responsibilities": ["orchestration", "routing", "gate_enforcement"]
+    },
+    {
+      "name": "versioning_agent",
+      "type": "local",
+      "responsibilities": ["branch_create", "pr_open", "merge"]
+    },
+    {
+      "name": "triage_agent",
+      "type": "llm",
+      "responsibilities": ["task_classification", "risk_scoring", "intensity_selection"]
+    },
+    {
+      "name": "planner_agent",
+      "type": "llm",
+      "responsibilities": ["plan_generation", "acceptance_criteria"]
+    },
+    {
+      "name": "coder_agent",
+      "type": "llm",
+      "responsibilities": ["diff_generation", "repair_loop"]
+    },
+    {
+      "name": "reviewer_agent",
+      "type": "llm",
+      "responsibilities": ["regression_detection", "risk_review"]
+    }
+  ],
+  "routing": {
+    "intensity": {
+      "fast": {
+        "model_profile": "small",
+        "context_budget": "low",
+        "gates": ["requirements", "ci_basic", "review_basic"]
+      },
+      "normal": {
+        "model_profile": "medium",
+        "context_budget": "medium",
+        "gates": ["requirements", "ci_full", "security", "review", "docs"]
+      },
+      "deep": {
+        "model_profile": "best_available",
+        "context_budget": "high",
+        "gates": [
+          "requirements",
+          "architecture",
+          "ci_full",
+          "security",
+          "qa_matrix",
+          "perf",
+          "review",
+          "docs"
+        ]
+      }
+    }
+  },
+  "gates": {
+    "required_pre_merge": [
+      "requirements_clear",
+      "architecture_approval_if_required",
+      "ci_full",
+      "security",
+      "qa_matrix",
+      "perf_budget",
+      "review",
+      "docs",
+      "human_merge_approval",
+      "branch_up_to_date"
+    ],
+    "required_pre_rollout": [
+      "post_deploy_smoke",
+      "slo_health",
+      "alert_health"
+    ]
+  },
+  "human_checkpoints": {
+    "required": [
+      "unclear_or_conflicting_requirements",
+      "high_risk_design_approval",
+      "security_or_privacy_impacting_change",
+      "irreversible_data_operation",
+      "merge_to_main"
+    ],
+    "optional": [
+      "plan_approval_for_large_features",
+      "mid_task_correction_when_confidence_low"
+    ]
+  }
+}

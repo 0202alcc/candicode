@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["work_branch"],
+  "properties": {
+    "work_branch": {"type": "string"}
+  }
+}
