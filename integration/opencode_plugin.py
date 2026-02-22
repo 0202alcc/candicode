@@ -515,6 +515,7 @@ def _phase_agent_map() -> Dict[str, str]:
     mapping = dict(BasicAgentSuite.AGENT_PHASES)
     mapping.update(
         {
+            "ingress_guard": "ingress_guard(local)",
             "versioning": "versioning_agent",
             "execute": "tool_runner(repo.write/repo.search)",
             "verify": "verification_runner",
@@ -528,6 +529,7 @@ def _phase_agent_map() -> Dict[str, str]:
 
 def _phase_color_map() -> Dict[str, str]:
     return {
+        "ingress_guard": "#FB7185",
         "intent": "#FF5FA2",
         "triage": "#FF3B30",
         "requirements": "#FF8C00",

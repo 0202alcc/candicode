@@ -72,14 +72,15 @@ class SupervisorTests(unittest.TestCase):
 
             assert task is not None
             self.assertEqual("completed", task.status)
-            self.assertEqual(14, len(task.phase_history))
-            self.assertEqual("intent", task.phase_history[0].phase)
+            self.assertEqual(15, len(task.phase_history))
+            self.assertEqual("ingress_guard", task.phase_history[0].phase)
+            self.assertEqual("intent", task.phase_history[1].phase)
             self.assertEqual("finalize", task.phase_history[-1].phase)
             self.assertEqual("gate_pre_merge", task.phase_history[-2].phase)
             self.assertEqual("human_checkpoints", task.phase_history[-3].phase)
-            self.assertEqual("versioning", task.phase_history[3].phase)
-            self.assertEqual("code", task.phase_history[5].phase)
-            self.assertEqual("docs", task.phase_history[8].phase)
+            self.assertEqual("versioning", task.phase_history[4].phase)
+            self.assertEqual("code", task.phase_history[6].phase)
+            self.assertEqual("docs", task.phase_history[9].phase)
             self.assertIsNotNone(task.work_branch)
 
     def test_process_next_blocks_on_failed_phase(self) -> None:
@@ -106,7 +107,10 @@ class SupervisorTests(unittest.TestCase):
 
             assert task is not None
             self.assertEqual("blocked", task.status)
-            self.assertEqual(["intent", "triage", "requirements"], [p.phase for p in task.phase_history])
+            self.assertEqual(
+                ["ingress_guard", "intent", "triage", "requirements"],
+                [p.phase for p in task.phase_history],
+            )
 
     def test_run_prompt_creates_and_processes_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -158,7 +162,7 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(0, versioning.create_calls)
             self.assertEqual(0, versioning.guard_calls)
             self.assertEqual(0, calls["tool"])
-            self.assertIn("dry-run", task.phase_history[3].detail)
+            self.assertIn("dry-run", task.phase_history[4].detail)
             self.assertIn("dry-run", [p.detail for p in task.phase_history if p.phase == "execute"][0])
 
     def test_execute_blocks_untrusted_non_read_tool(self) -> None:
@@ -393,6 +397,7 @@ class SupervisorTests(unittest.TestCase):
             assert task is not None
             self.assertEqual("completed", task.status)
             for phase in [
+                "ingress_guard",
                 "intent",
                 "triage",
                 "requirements",
@@ -409,6 +414,22 @@ class SupervisorTests(unittest.TestCase):
                 "finalize",
             ]:
                 self.assertIn(phase, task.handoff_artifacts)
+
+    def test_ingress_guard_redacts_secrets_and_marks_tainted_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "state.json"
+            store = StateStore(state_path)
+            supervisor = Supervisor(TaskQueue(), store)
+
+            task = supervisor.run_prompt(
+                "Use this API key sk-1234567890abcdef1234567890abcdef and pasted log from https://example.com"
+            )
+            ingress = task.agent_outputs["ingress_guard"]
+            self.assertTrue(ingress["sanitized"])
+            self.assertTrue(ingress["tainted"])
+            self.assertTrue(ingress["redactions"])
+            self.assertFalse(task.trusted_context)
+            self.assertNotIn("sk-1234567890abcdef1234567890abcdef", task.prompt)
 
     def test_basic_agent_suite_handlers_integrate_with_supervisor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

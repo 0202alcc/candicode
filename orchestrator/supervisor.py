@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import heapq
 import json
+import re
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from contracts.registry import ContractRegistry
 from orchestrator.approvals import ApprovalManager
@@ -146,6 +147,7 @@ class Supervisor:
         self.resilience_manager = resilience_manager
         self.phase_event_callback = phase_event_callback
         self.phase_order = phase_order or [
+            "ingress_guard",
             "intent",
             "triage",
             "requirements",
@@ -397,6 +399,8 @@ class Supervisor:
             return result
 
     def _run_phase(self, phase: str, task: Task) -> PhaseResult:
+        if phase == "ingress_guard":
+            return self._run_ingress_guard_phase(task)
         if phase == "versioning":
             return self._run_versioning_phase(task)
         if phase == "execute":
@@ -423,6 +427,34 @@ class Supervisor:
             phase=phase,
             status="success",
             detail=f"stub phase {phase} completed",
+            timestamp=time.time(),
+        )
+
+    def _run_ingress_guard_phase(self, task: Task) -> PhaseResult:
+        original_prompt = task.prompt
+        redacted_prompt, redactions = self._redact_prompt(original_prompt)
+        tainted = self._is_tainted_prompt(original_prompt)
+        task.prompt = redacted_prompt
+        task.trusted_context = task.trusted_context and not tainted
+        notes: List[str] = []
+        if redactions:
+            notes.append("secret redaction applied")
+        if tainted:
+            notes.append("untrusted context markers detected")
+        task.agent_outputs["ingress_guard"] = {
+            "sanitized": redacted_prompt != original_prompt,
+            "tainted": tainted,
+            "redactions": redactions,
+            "notes": notes,
+        }
+        return PhaseResult(
+            phase="ingress_guard",
+            status="success",
+            detail=(
+                "ingress guard passed"
+                if not notes
+                else f"ingress guard passed ({'; '.join(notes)})"
+            ),
             timestamp=time.time(),
         )
 
@@ -700,6 +732,13 @@ class Supervisor:
         return self._default_phase_payload(phase, task)
 
     def _default_phase_payload(self, phase: str, task: Task) -> Dict:
+        if phase == "ingress_guard":
+            return {
+                "sanitized": False,
+                "tainted": False,
+                "redactions": [],
+                "notes": [],
+            }
         if phase == "intent":
             return {
                 "rewritten_prompt": task.prompt,
@@ -767,6 +806,41 @@ class Supervisor:
         if phase == "finalize":
             return {"outcome": "completed", "summary": "task finalized"}
         return {"phase": phase}
+
+    @staticmethod
+    def _redact_prompt(text: str) -> Tuple[str, List[str]]:
+        redacted = text
+        redactions: List[str] = []
+        patterns = [
+            ("openai_api_key", r"\bsk-[A-Za-z0-9]{16,}\b"),
+            ("github_token", r"\bgh[pousr]_[A-Za-z0-9]{16,}\b"),
+            ("aws_access_key_id", r"\bAKIA[0-9A-Z]{16}\b"),
+            ("bearer_token", r"(?i)\bbearer\s+[A-Za-z0-9._-]{16,}\b"),
+            ("credential_assignment", r"(?i)\b(api[_-]?key|token|password|secret)\b\s*[:=]\s*['\"]?[^\s,'\"]+"),
+        ]
+        for label, pattern in patterns:
+            matches = re.findall(pattern, redacted)
+            if not matches:
+                continue
+            redacted = re.sub(pattern, f"[REDACTED_{label.upper()}]", redacted)
+            redactions.append(f"{label}:{len(matches)}")
+        return redacted, redactions
+
+    @staticmethod
+    def _is_tainted_prompt(text: str) -> bool:
+        lower = text.lower()
+        markers = [
+            "```",
+            "<script",
+            "http://",
+            "https://",
+            "-----begin",
+            "traceback",
+            "stack trace",
+            "untrusted",
+            "pasted log",
+        ]
+        return any(marker in lower for marker in markers)
 
     @staticmethod
     def _default_policy_context(_: Task) -> PolicyContext:
