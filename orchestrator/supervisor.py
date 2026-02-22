@@ -165,6 +165,7 @@ class Supervisor:
             "test",
             "ci_gate",
             "security_gate",
+            "qa_perf_gate",
             "review",
             "docs",
             "execute",
@@ -426,6 +427,8 @@ class Supervisor:
             return self._run_ci_gate_phase(task)
         if phase == "security_gate":
             return self._run_security_gate_phase(task)
+        if phase == "qa_perf_gate":
+            return self._run_qa_perf_gate_phase(task)
         if phase == "versioning":
             return self._run_versioning_phase(task)
         if phase == "execute":
@@ -703,6 +706,50 @@ class Supervisor:
             phase="security_gate",
             status="success",
             detail="security gate passed",
+            timestamp=time.time(),
+        )
+
+    def _run_qa_perf_gate_phase(self, task: Task) -> PhaseResult:
+        payload = task.agent_outputs.get("qa_perf", {})
+        if not isinstance(payload, dict):
+            payload = {}
+        raw_matrix = payload.get("qa_matrix")
+        matrix: Dict[str, str] = {}
+        if isinstance(raw_matrix, dict):
+            for key, value in raw_matrix.items():
+                if not isinstance(key, str) or not key.strip():
+                    continue
+                if isinstance(value, str) and value.strip() in {"pass", "fail", "skip"}:
+                    matrix[key.strip()] = value.strip()
+        raw_violations = payload.get("budget_violations")
+        violations = (
+            [item.strip() for item in raw_violations if isinstance(item, str) and item.strip()]
+            if isinstance(raw_violations, list)
+            else []
+        )
+        matrix_failures = sorted([name for name, status in matrix.items() if status == "fail"])
+        passed = not matrix_failures and not violations
+        task.agent_outputs["qa_perf_gate"] = {
+            "pass": passed,
+            "qa_matrix": matrix,
+            "budget_violations": violations,
+        }
+        if not passed:
+            parts: List[str] = []
+            if matrix_failures:
+                parts.append(f"qa failures: {', '.join(matrix_failures)}")
+            if violations:
+                parts.append(f"budget violations: {', '.join(violations)}")
+            return PhaseResult(
+                phase="qa_perf_gate",
+                status="failed",
+                detail="qa/perf gate failed (" + "; ".join(parts) + ")",
+                timestamp=time.time(),
+            )
+        return PhaseResult(
+            phase="qa_perf_gate",
+            status="success",
+            detail="qa/perf gate passed",
             timestamp=time.time(),
         )
 
@@ -1061,6 +1108,12 @@ class Supervisor:
                 "critical_findings": [],
                 "high_findings": [],
                 "waiver_candidates": [],
+            }
+        if phase == "qa_perf_gate":
+            return {
+                "pass": True,
+                "qa_matrix": {},
+                "budget_violations": [],
             }
         if phase == "review":
             return {

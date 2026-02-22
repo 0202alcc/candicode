@@ -72,7 +72,7 @@ class SupervisorTests(unittest.TestCase):
 
             assert task is not None
             self.assertEqual("completed", task.status)
-            self.assertEqual(20, len(task.phase_history))
+            self.assertEqual(21, len(task.phase_history))
             self.assertEqual("ingress_guard", task.phase_history[0].phase)
             self.assertEqual("budget_envelope", task.phase_history[1].phase)
             self.assertEqual("intent", task.phase_history[2].phase)
@@ -84,7 +84,8 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual("versioning", task.phase_history[7].phase)
             self.assertEqual("code", task.phase_history[9].phase)
             self.assertEqual("security_gate", task.phase_history[12].phase)
-            self.assertEqual("docs", task.phase_history[14].phase)
+            self.assertEqual("qa_perf_gate", task.phase_history[13].phase)
+            self.assertEqual("docs", task.phase_history[15].phase)
             self.assertIsNotNone(task.work_branch)
 
     def test_process_next_blocks_on_failed_phase(self) -> None:
@@ -421,6 +422,7 @@ class SupervisorTests(unittest.TestCase):
                 "test",
                 "ci_gate",
                 "security_gate",
+                "qa_perf_gate",
                 "review",
                 "docs",
                 "execute",
@@ -524,6 +526,39 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual("blocked", task.status)
             self.assertEqual("security_gate", task.phase_history[-1].phase)
             self.assertIn("security gate failed", task.phase_history[-1].detail)
+
+    def test_qa_perf_gate_blocks_on_budget_violations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = StateStore(Path(tmp) / "state.json")
+
+            def test_with_perf_violations(task: Task) -> PhaseResult:
+                task.agent_outputs["test"] = {
+                    "tests_added": ["tests/test_perf.py"],
+                    "checks_to_run": [],
+                }
+                task.agent_outputs["qa_perf"] = {
+                    "qa_matrix": {"linux-py311": "pass", "macos-py311": "pass"},
+                    "budget_violations": ["p95 latency +28%", "bundle size +180KB"],
+                }
+                return PhaseResult(
+                    phase="test",
+                    status="success",
+                    detail="qa/perf payload ready",
+                    timestamp=time.time(),
+                )
+
+            supervisor = Supervisor(
+                queue=TaskQueue(),
+                state_store=store,
+                phase_handlers={"test": test_with_perf_violations},
+            )
+            supervisor.create_task("perf regressions present")
+            task = supervisor.process_next()
+
+            assert task is not None
+            self.assertEqual("blocked", task.status)
+            self.assertEqual("qa_perf_gate", task.phase_history[-1].phase)
+            self.assertIn("qa/perf gate failed", task.phase_history[-1].detail)
 
     def test_requirements_gate_blocks_when_open_questions_remain(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
