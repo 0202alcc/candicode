@@ -285,7 +285,7 @@ class Supervisor:
                     "status": "output",
                     "detail": f"{result.phase} output",
                     "timestamp": result.timestamp,
-                    "output": self._build_phase_payload(result.phase, task),
+                    "output": self._build_phase_output_payload(result, task),
                 },
             )
             self.state_store.save_task(task)
@@ -1443,6 +1443,13 @@ class Supervisor:
         if builder is not None:
             return builder(task)
         return self._default_phase_payload(phase, task)
+
+    def _build_phase_output_payload(self, result: PhaseResult, task: Task) -> Dict:
+        # Avoid emitting synthetic default payloads for failed phases, which can
+        # look like successful agent outputs in the UI.
+        if result.status != "success" and result.phase not in task.agent_outputs:
+            return {"error": result.detail}
+        return self._build_phase_payload(result.phase, task)
 
     def _default_phase_payload(self, phase: str, task: Task) -> Dict:
         if phase == "ingress_guard":

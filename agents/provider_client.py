@@ -88,7 +88,10 @@ class OpenAICompatibleHostedModelClient(HostedModelClient):
         msg = first.get("message") if isinstance(first, dict) else None
         content = msg.get("content") if isinstance(msg, dict) else None
         if isinstance(content, str):
-            return content.strip()
+            stripped = content.strip()
+            if stripped:
+                return stripped
+            raise ValueError("Provider response message.content is empty")
         if isinstance(content, list):
             parts = []
             for item in content:
@@ -97,7 +100,10 @@ class OpenAICompatibleHostedModelClient(HostedModelClient):
                 if item.get("type") == "text" and isinstance(item.get("text"), str):
                     parts.append(item["text"])
             if parts:
-                return "\n".join(parts).strip()
+                stripped = "\n".join(parts).strip()
+                if stripped:
+                    return stripped
+                raise ValueError("Provider response message.content text parts are empty")
         raise ValueError("Provider response missing message.content")
 
     @staticmethod
@@ -106,7 +112,8 @@ class OpenAICompatibleHostedModelClient(HostedModelClient):
         try:
             parsed = json.loads(text)
         except Exception as exc:
-            raise ValueError(f"Provider returned non-JSON output: {text[:200]}") from exc
+            snippet = text[:200] if text else "<empty>"
+            raise ValueError(f"Provider returned non-JSON output: {snippet}") from exc
         if not isinstance(parsed, dict):
             raise ValueError("Provider JSON output must be an object")
         return parsed

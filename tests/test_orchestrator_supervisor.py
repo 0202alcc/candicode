@@ -137,6 +137,43 @@ class SupervisorTests(unittest.TestCase):
                 [p.phase for p in task.phase_history],
             )
 
+    def test_failed_phase_output_event_uses_error_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "state.json"
+            store = StateStore(state_path)
+            events = []
+
+            def failing_requirements(_: Task) -> PhaseResult:
+                return PhaseResult(
+                    phase="requirements",
+                    status="failed",
+                    detail="requirements ambiguous",
+                    timestamp=time.time(),
+                )
+
+            supervisor = Supervisor(
+                queue=TaskQueue(),
+                state_store=store,
+                phase_handlers={"requirements": failing_requirements},
+                phase_event_callback=lambda _task, event: events.append(dict(event)),
+            )
+
+            supervisor.create_task("do the thing")
+            task = supervisor.process_next()
+            assert task is not None
+            self.assertEqual("blocked", task.status)
+
+            req_output = [
+                evt
+                for evt in events
+                if evt.get("phase") == "requirements" and evt.get("status") == "output"
+            ]
+            self.assertTrue(req_output)
+            self.assertEqual(
+                {"error": "requirements ambiguous"},
+                req_output[-1].get("output"),
+            )
+
     def test_run_prompt_creates_and_processes_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = StateStore(Path(tmp) / "state.json")

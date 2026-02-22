@@ -105,6 +105,18 @@ class ProviderClientTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "HTTP error 401"):
                 client.generate_structured("triage_agent", "triage this", {})
 
+    def test_generate_structured_rejects_empty_content_with_clear_error(self) -> None:
+        response = {"choices": [{"message": {"content": "   "}}]}
+        with mock.patch("urllib.request.urlopen", return_value=_FakeHTTPResponse(response)):
+            client = OpenAICompatibleHostedModelClient(
+                api_key="test-key",
+                model="test-model",
+                base_url="https://api.provider.example/v1",
+                timeout_seconds=5,
+            )
+            with self.assertRaisesRegex(ValueError, "message.content is empty"):
+                client.generate_structured("triage_agent", "triage this", {})
+
     def test_from_env_requires_api_key_and_model(self) -> None:
         prev = dict(os.environ)
         try:
