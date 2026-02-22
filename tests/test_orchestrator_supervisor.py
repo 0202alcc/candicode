@@ -174,6 +174,38 @@ class SupervisorTests(unittest.TestCase):
                 req_output[-1].get("output"),
             )
 
+    def test_triage_handoff_normalizes_string_confidence_score(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            state_path = Path(tmp) / "state.json"
+            store = StateStore(state_path)
+
+            def triage_string_confidence(task: Task) -> PhaseResult:
+                task.agent_outputs["triage"] = {
+                    "task_type": "bug",
+                    "risk_level": "low",
+                    "scope_size": "small",
+                    "intensity": "normal",
+                    "confidence_score": "0.35",
+                }
+                return PhaseResult(
+                    phase="triage",
+                    status="success",
+                    detail="triage payload with string confidence",
+                    timestamp=time.time(),
+                )
+
+            supervisor = Supervisor(
+                queue=TaskQueue(),
+                state_store=store,
+                phase_handlers={"triage": triage_string_confidence},
+            )
+
+            task = supervisor.run_prompt("hello world")
+            self.assertEqual("completed", task.status)
+            confidence = task.agent_outputs["triage"]["confidence_score"]
+            self.assertIsInstance(confidence, float)
+            self.assertEqual(0.35, confidence)
+
     def test_run_prompt_creates_and_processes_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = StateStore(Path(tmp) / "state.json")

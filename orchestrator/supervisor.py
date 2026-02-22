@@ -455,6 +455,7 @@ class Supervisor:
 
             result = self._run_phase(phase, task)
             if result.status == "success":
+                self._apply_phase_normalization(phase, task)
                 contract_result = self._validate_phase_handoff(phase, task)
                 if contract_result is None:
                     return result
@@ -1424,6 +1425,9 @@ class Supervisor:
             return None
 
         payload = self._build_phase_payload(phase, task)
+        payload = self._normalize_phase_payload(phase, payload)
+        if phase in task.agent_outputs:
+            task.agent_outputs[phase] = payload
         validation = self.contract_registry.validate(phase, payload)
         if not validation.valid:
             return PhaseResult(
@@ -1435,6 +1439,38 @@ class Supervisor:
 
         task.handoff_artifacts[phase] = payload
         return None
+
+    def _apply_phase_normalization(self, phase: str, task: Task) -> None:
+        payload = task.agent_outputs.get(phase)
+        if not isinstance(payload, dict):
+            return
+        normalized = self._normalize_phase_payload(phase, payload)
+        task.agent_outputs[phase] = normalized
+
+    @staticmethod
+    def _normalize_phase_payload(phase: str, payload: Dict) -> Dict:
+        if not isinstance(payload, dict):
+            return payload
+        if phase != "triage":
+            return payload
+        raw = payload.get("confidence_score")
+        if isinstance(raw, (int, float)):
+            return payload
+        if raw is None:
+            return payload
+        try:
+            value = float(raw)
+        except (TypeError, ValueError):
+            return payload
+        if value != value:  # NaN
+            return payload
+        if value < 0.0:
+            value = 0.0
+        elif value > 1.0:
+            value = 1.0
+        normalized = dict(payload)
+        normalized["confidence_score"] = value
+        return normalized
 
     def _build_phase_payload(self, phase: str, task: Task) -> Dict:
         if phase in task.agent_outputs:

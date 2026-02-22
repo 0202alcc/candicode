@@ -5,7 +5,11 @@ import subprocess
 import unittest
 from argparse import Namespace
 
-from scripts.opencode_entrypoint import _resolve_client_mode, _resolve_provider_settings
+from scripts.opencode_entrypoint import (
+    _provider_error_text,
+    _resolve_client_mode,
+    _resolve_provider_settings,
+)
 
 
 class OpencodeEntrypointTests(unittest.TestCase):
@@ -47,6 +51,10 @@ class OpencodeEntrypointTests(unittest.TestCase):
 
     def test_resolve_client_mode_auto_uses_provider_for_local_provider(self) -> None:
         self.assertEqual("provider", _resolve_client_mode("auto", "localpc", "qwen2.5-coder"))
+
+    def test_provider_error_text_flags_retriable_output_shape_errors(self) -> None:
+        self.assertTrue(_provider_error_text("intent_agent error: Provider response message.content is empty"))
+        self.assertTrue(_provider_error_text("triage_agent error: Provider returned non-JSON output: <empty>"))
 
     def test_resolve_provider_settings_supports_provider_specific_env(self) -> None:
         prev = dict(os.environ)

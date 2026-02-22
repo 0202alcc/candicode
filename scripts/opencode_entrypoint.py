@@ -164,6 +164,10 @@ def _provider_error_text(detail: str) -> bool:
     markers = [
         "provider connection error",
         "provider http error",
+        "provider response message.content is empty",
+        "provider response message.content text parts are empty",
+        "provider returned non-json output",
+        "backend response output_text is not valid json",
         "certificate verify failed",
         "ssl:",
         "urlopen error",
