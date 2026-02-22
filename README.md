@@ -102,8 +102,8 @@ flowchart TD
   classDef implemented stroke:#166534,stroke-width:3px;
   classDef planned stroke:#9CA3AF,stroke-dasharray: 6 4,stroke-width:2px;
 
-  class EI,EIG,N,O,BR1,ST1,D,E,G,H,J,Q,R,U,V,X,Y,ZA,ZB,ZD,ZF,ZI,ZL,ZM,ZN,ZQ,ZR,ZS,ZU,ZV,ZY,ZZ implemented;
-  class B,F,I,K,L,M,P,S,T,W,Z,ZC,ZE,ZG,ZH,ZJ,ZK,ZO,ZP,ZT,ZW,ZX planned;
+  %% All pipeline nodes are implemented (Step 14 closed loop).
+  class A,B,C,D,E,EI,EIG,F,G,H,I,J,K,L,M,N,O,P,Q,R,S,T,U,V,W,X,Y,Z,ZA,ZB,ZC,ZD,ZE,ZF,ZG,ZH,ZI,ZJ,ZK,ZL,ZM,ZN,ZO,ZP,ZQ,ZR,ZS,ZT,ZU,ZV,ZW,ZX,ZY,ZZ,BR1,ST1 implemented;
 
 ```
 

@@ -300,6 +300,19 @@ class Supervisor:
             )
             if result.status != "success":
                 task.status = "blocked"
+                self._emit_phase_event(
+                    task,
+                    {
+                        "phase": result.phase,
+                        "status": "blocked",
+                        "detail": f"blocked at {result.phase}: {result.detail}",
+                        "timestamp": time.time(),
+                        "output": {
+                            "blocked_phase": result.phase,
+                            "reason": result.detail,
+                        },
+                    },
+                )
                 self._write_provenance_bundle(task, outcome="blocked")
                 self.state_store.save_task(task)
                 self._emit_audit(
@@ -320,6 +333,41 @@ class Supervisor:
                     timestamp=time.time(),
                 )
                 task.phase_history.append(budget_result)
+                self._emit_phase_event(
+                    task,
+                    {
+                        "phase": budget_result.phase,
+                        "status": budget_result.status,
+                        "detail": budget_result.detail,
+                        "timestamp": budget_result.timestamp,
+                    },
+                )
+                self._emit_phase_event(
+                    task,
+                    {
+                        "phase": budget_result.phase,
+                        "status": "output",
+                        "detail": "budget output",
+                        "timestamp": budget_result.timestamp,
+                        "output": {
+                            "failures": budget_failures,
+                            "reason": detail,
+                        },
+                    },
+                )
+                self._emit_phase_event(
+                    task,
+                    {
+                        "phase": budget_result.phase,
+                        "status": "blocked",
+                        "detail": f"blocked at budget: {detail}",
+                        "timestamp": time.time(),
+                        "output": {
+                            "blocked_phase": "budget",
+                            "reason": detail,
+                        },
+                    },
+                )
                 self._emit_audit("budget_block", task, {"failures": budget_failures})
                 self._write_provenance_bundle(task, outcome="blocked")
                 self.state_store.save_task(task)
