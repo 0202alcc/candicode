@@ -51,6 +51,11 @@ class Task:
     safe_mode: bool = False
     failure_count: int = 0
     tool_calls: int = 0
+    token_estimate: int = 0
+    budget_token_limit: Optional[int] = None
+    budget_tool_limit: Optional[int] = None
+    budget_time_limit_seconds: Optional[float] = None
+    budget_envelope_id: Optional[str] = None
     status: str = "queued"
     phase_history: List[PhaseResult] = field(default_factory=list)
 
@@ -148,6 +153,7 @@ class Supervisor:
         self.phase_event_callback = phase_event_callback
         self.phase_order = phase_order or [
             "ingress_guard",
+            "budget_envelope",
             "intent",
             "triage",
             "requirements",
@@ -328,6 +334,11 @@ class Supervisor:
             safe_mode=task_payload.get("safe_mode", False),
             failure_count=task_payload.get("failure_count", 0),
             tool_calls=task_payload.get("tool_calls", 0),
+            token_estimate=task_payload.get("token_estimate", 0),
+            budget_token_limit=task_payload.get("budget_token_limit"),
+            budget_tool_limit=task_payload.get("budget_tool_limit"),
+            budget_time_limit_seconds=task_payload.get("budget_time_limit_seconds"),
+            budget_envelope_id=task_payload.get("budget_envelope_id"),
             status="replayed",
             phase_history=phase_history,
         )
@@ -401,6 +412,8 @@ class Supervisor:
     def _run_phase(self, phase: str, task: Task) -> PhaseResult:
         if phase == "ingress_guard":
             return self._run_ingress_guard_phase(task)
+        if phase == "budget_envelope":
+            return self._run_budget_envelope_phase(task)
         if phase == "versioning":
             return self._run_versioning_phase(task)
         if phase == "execute":
@@ -454,6 +467,35 @@ class Supervisor:
                 "ingress guard passed"
                 if not notes
                 else f"ingress guard passed ({'; '.join(notes)})"
+            ),
+            timestamp=time.time(),
+        )
+
+    def _run_budget_envelope_phase(self, task: Task) -> PhaseResult:
+        profiles = {
+            "interactive": {"token_budget": 12000, "tool_budget": 20, "time_budget_seconds": 300.0},
+            "release_blocking": {"token_budget": 30000, "tool_budget": 40, "time_budget_seconds": 900.0},
+            "background": {"token_budget": 6000, "tool_budget": 10, "time_budget_seconds": 180.0},
+        }
+        profile = profiles.get(task.priority, profiles["background"])
+        budget_id = f"{task.task_id}:{task.priority}:v1"
+        task.budget_token_limit = int(profile["token_budget"])
+        task.budget_tool_limit = int(profile["tool_budget"])
+        task.budget_time_limit_seconds = float(profile["time_budget_seconds"])
+        task.budget_envelope_id = budget_id
+        task.agent_outputs["budget_envelope"] = {
+            "token_budget": task.budget_token_limit,
+            "tool_budget": task.budget_tool_limit,
+            "time_budget_seconds": task.budget_time_limit_seconds,
+            "budget_id": budget_id,
+            "policy": "priority_profile_v1",
+        }
+        return PhaseResult(
+            phase="budget_envelope",
+            status="success",
+            detail=(
+                "budget envelope set "
+                f"(tokens={task.budget_token_limit}, tools={task.budget_tool_limit}, time={task.budget_time_limit_seconds}s)"
             ),
             timestamp=time.time(),
         )
@@ -739,6 +781,14 @@ class Supervisor:
                 "redactions": [],
                 "notes": [],
             }
+        if phase == "budget_envelope":
+            return {
+                "token_budget": task.budget_token_limit or 1,
+                "tool_budget": task.budget_tool_limit or 1,
+                "time_budget_seconds": task.budget_time_limit_seconds or 1.0,
+                "budget_id": task.budget_envelope_id or "",
+                "policy": "priority_profile_v1",
+            }
         if phase == "intent":
             return {
                 "rewritten_prompt": task.prompt,
@@ -883,11 +933,38 @@ class Supervisor:
         task.provenance_bundle_path = str(path)
 
     def _check_budget(self, task: Task, start_time: float) -> List[str]:
-        if self.resilience_manager is None:
-            return []
         elapsed = time.time() - start_time
-        return self.resilience_manager.budget_exceeded(
-            task_id=task.task_id,
-            elapsed_seconds=elapsed,
-            tool_calls=task.tool_calls,
-        )
+        task.token_estimate = self._estimate_task_tokens(task)
+        failures: List[str] = []
+        if task.budget_token_limit is not None and task.token_estimate > task.budget_token_limit:
+            failures.append("token_budget")
+        if task.budget_tool_limit is not None and task.tool_calls > task.budget_tool_limit:
+            failures.append("tool_budget")
+        if task.budget_time_limit_seconds is not None and elapsed > task.budget_time_limit_seconds:
+            failures.append("time_budget_seconds")
+        if self.resilience_manager is not None:
+            failures.extend(
+                self.resilience_manager.budget_exceeded(
+                    task_id=task.task_id,
+                    elapsed_seconds=elapsed,
+                    tool_calls=task.tool_calls,
+                )
+            )
+        seen = set()
+        unique: List[str] = []
+        for failure in failures:
+            if failure in seen:
+                continue
+            seen.add(failure)
+            unique.append(failure)
+        return unique
+
+    @staticmethod
+    def _estimate_task_tokens(task: Task) -> int:
+        total_chars = len(task.prompt)
+        for payload in task.agent_outputs.values():
+            try:
+                total_chars += len(json.dumps(payload, sort_keys=True))
+            except Exception:
+                total_chars += len(str(payload))
+        return max(1, total_chars // 4)

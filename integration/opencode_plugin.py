@@ -516,6 +516,7 @@ def _phase_agent_map() -> Dict[str, str]:
     mapping.update(
         {
             "ingress_guard": "ingress_guard(local)",
+            "budget_envelope": "budget_envelope(local)",
             "versioning": "versioning_agent",
             "execute": "tool_runner(repo.write/repo.search)",
             "verify": "verification_runner",
@@ -530,6 +531,7 @@ def _phase_agent_map() -> Dict[str, str]:
 def _phase_color_map() -> Dict[str, str]:
     return {
         "ingress_guard": "#FB7185",
+        "budget_envelope": "#F97316",
         "intent": "#FF5FA2",
         "triage": "#FF3B30",
         "requirements": "#FF8C00",

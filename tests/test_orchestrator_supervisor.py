@@ -72,15 +72,16 @@ class SupervisorTests(unittest.TestCase):
 
             assert task is not None
             self.assertEqual("completed", task.status)
-            self.assertEqual(15, len(task.phase_history))
+            self.assertEqual(16, len(task.phase_history))
             self.assertEqual("ingress_guard", task.phase_history[0].phase)
-            self.assertEqual("intent", task.phase_history[1].phase)
+            self.assertEqual("budget_envelope", task.phase_history[1].phase)
+            self.assertEqual("intent", task.phase_history[2].phase)
             self.assertEqual("finalize", task.phase_history[-1].phase)
             self.assertEqual("gate_pre_merge", task.phase_history[-2].phase)
             self.assertEqual("human_checkpoints", task.phase_history[-3].phase)
-            self.assertEqual("versioning", task.phase_history[4].phase)
-            self.assertEqual("code", task.phase_history[6].phase)
-            self.assertEqual("docs", task.phase_history[9].phase)
+            self.assertEqual("versioning", task.phase_history[5].phase)
+            self.assertEqual("code", task.phase_history[7].phase)
+            self.assertEqual("docs", task.phase_history[10].phase)
             self.assertIsNotNone(task.work_branch)
 
     def test_process_next_blocks_on_failed_phase(self) -> None:
@@ -108,7 +109,7 @@ class SupervisorTests(unittest.TestCase):
             assert task is not None
             self.assertEqual("blocked", task.status)
             self.assertEqual(
-                ["ingress_guard", "intent", "triage", "requirements"],
+                ["ingress_guard", "budget_envelope", "intent", "triage", "requirements"],
                 [p.phase for p in task.phase_history],
             )
 
@@ -162,7 +163,7 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(0, versioning.create_calls)
             self.assertEqual(0, versioning.guard_calls)
             self.assertEqual(0, calls["tool"])
-            self.assertIn("dry-run", task.phase_history[4].detail)
+            self.assertIn("dry-run", task.phase_history[5].detail)
             self.assertIn("dry-run", [p.detail for p in task.phase_history if p.phase == "execute"][0])
 
     def test_execute_blocks_untrusted_non_read_tool(self) -> None:
@@ -398,6 +399,7 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual("completed", task.status)
             for phase in [
                 "ingress_guard",
+                "budget_envelope",
                 "intent",
                 "triage",
                 "requirements",
@@ -430,6 +432,50 @@ class SupervisorTests(unittest.TestCase):
             self.assertTrue(ingress["redactions"])
             self.assertFalse(task.trusted_context)
             self.assertNotIn("sk-1234567890abcdef1234567890abcdef", task.prompt)
+
+    def test_budget_envelope_blocks_when_tool_budget_exceeded(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            store = StateStore(repo / "state.json")
+
+            def repo_write(req):
+                target = repo / req.params["path"]
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(req.params["content"], encoding="utf-8")
+                return ToolResult(ok=True, detail=f"wrote {target}")
+
+            tool_runner = ToolRunner(
+                handlers={"repo.write": repo_write, "repo.search": lambda _req: ToolResult(ok=True, detail="search ok")},
+                safe_tools={"repo.write", "repo.search", "repo.read", "test.run", "lint.run"},
+            )
+
+            edits = []
+            touched = []
+            for i in range(11):
+                rel = f"src/file_{i}.txt"
+                touched.append(rel)
+                edits.append({"path": rel, "content": f"value-{i}\n"})
+
+            handlers = {
+                "code": lambda task: (
+                    task.agent_outputs.__setitem__("code", {"changes": ["bulk write"], "files_touched": touched, "file_edits": edits})
+                    or PhaseResult(phase="code", status="success", detail="bulk edits prepared", timestamp=time.time())
+                )
+            }
+
+            supervisor = Supervisor(
+                queue=TaskQueue(),
+                state_store=store,
+                phase_handlers=handlers,
+                tool_runner=tool_runner,
+            )
+            supervisor.create_task("exceed tool budget", priority="background")
+            task = supervisor.process_next()
+
+            assert task is not None
+            self.assertEqual("blocked", task.status)
+            self.assertEqual("budget", task.phase_history[-1].phase)
+            self.assertIn("tool_budget", task.phase_history[-1].detail)
 
     def test_basic_agent_suite_handlers_integrate_with_supervisor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
