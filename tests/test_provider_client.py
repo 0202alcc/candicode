@@ -35,7 +35,7 @@ class ProviderClientTests(unittest.TestCase):
         }
         captured = {}
 
-        def _urlopen(req, timeout):
+        def _urlopen(req, timeout=None, context=None):
             captured["url"] = req.full_url
             captured["auth"] = req.get_header("Authorization")
             headers = {k.lower(): v for k, v in req.header_items()}
@@ -127,7 +127,7 @@ class ProviderClientTests(unittest.TestCase):
     def test_post_json_skips_auth_header_when_api_key_empty(self) -> None:
         captured = {}
 
-        def _urlopen(req, timeout):
+        def _urlopen(req, timeout=None, context=None):
             captured["auth"] = req.get_header("Authorization")
             response = {
                 "choices": [{"message": {"content": '{"result":"ok"}'}}],
