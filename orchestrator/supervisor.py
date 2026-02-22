@@ -158,6 +158,7 @@ class Supervisor:
             "triage",
             "router_gate",
             "requirements",
+            "requirements_gate",
             "versioning",
             "plan",
             "code",
@@ -417,6 +418,8 @@ class Supervisor:
             return self._run_budget_envelope_phase(task)
         if phase == "router_gate":
             return self._run_router_gate_phase(task)
+        if phase == "requirements_gate":
+            return self._run_requirements_gate_phase(task)
         if phase == "versioning":
             return self._run_versioning_phase(task)
         if phase == "execute":
@@ -552,6 +555,58 @@ class Supervisor:
             phase="router_gate",
             status="success",
             detail=f"router confidence passed threshold (confidence={confidence:.2f}, threshold={threshold:.2f})",
+            timestamp=time.time(),
+        )
+
+    def _run_requirements_gate_phase(self, task: Task) -> PhaseResult:
+        requirements = self._build_phase_payload("requirements", task)
+        if not isinstance(requirements, dict):
+            requirements = {}
+        missing_items: List[str] = []
+        failures: List[str] = []
+
+        acceptance: List[str] = []
+        if isinstance(requirements, dict):
+            raw_acceptance = requirements.get("acceptance_criteria")
+            if isinstance(raw_acceptance, list):
+                acceptance = [item.strip() for item in raw_acceptance if isinstance(item, str) and item.strip()]
+        if not acceptance:
+            missing_items.append("acceptance_criteria")
+            failures.append("missing_acceptance_criteria")
+
+        open_questions: List[str] = []
+        if isinstance(requirements, dict):
+            raw_questions = requirements.get("open_questions")
+            if isinstance(raw_questions, list):
+                open_questions = [item.strip() for item in raw_questions if isinstance(item, str) and item.strip()]
+        if open_questions:
+            missing_items.append("open_questions_resolved")
+            failures.append("open_questions_pending")
+
+        clear = not failures
+        next_action = "proceed" if clear else "request_clarification"
+        task.agent_outputs["requirements_gate"] = {
+            "clear": clear,
+            "missing_items": missing_items,
+            "next_action": next_action,
+            "failures": failures,
+        }
+
+        if not clear:
+            return PhaseResult(
+                phase="requirements_gate",
+                status="failed",
+                detail=(
+                    "requirements not clear: "
+                    + ", ".join(missing_items)
+                    + ". Request structured clarification."
+                ),
+                timestamp=time.time(),
+            )
+        return PhaseResult(
+            phase="requirements_gate",
+            status="success",
+            detail="requirements clear; proceeding",
             timestamp=time.time(),
         )
 
@@ -871,6 +926,13 @@ class Supervisor:
                 "acceptance_criteria": ["placeholder acceptance criteria"],
                 "non_goals": [],
                 "open_questions": [],
+            }
+        if phase == "requirements_gate":
+            return {
+                "clear": True,
+                "missing_items": [],
+                "next_action": "proceed",
+                "failures": [],
             }
         if phase == "versioning":
             return {"work_branch": task.work_branch or ""}

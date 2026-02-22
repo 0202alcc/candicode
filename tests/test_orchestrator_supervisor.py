@@ -72,17 +72,18 @@ class SupervisorTests(unittest.TestCase):
 
             assert task is not None
             self.assertEqual("completed", task.status)
-            self.assertEqual(17, len(task.phase_history))
+            self.assertEqual(18, len(task.phase_history))
             self.assertEqual("ingress_guard", task.phase_history[0].phase)
             self.assertEqual("budget_envelope", task.phase_history[1].phase)
             self.assertEqual("intent", task.phase_history[2].phase)
             self.assertEqual("router_gate", task.phase_history[4].phase)
+            self.assertEqual("requirements_gate", task.phase_history[6].phase)
             self.assertEqual("finalize", task.phase_history[-1].phase)
             self.assertEqual("gate_pre_merge", task.phase_history[-2].phase)
             self.assertEqual("human_checkpoints", task.phase_history[-3].phase)
-            self.assertEqual("versioning", task.phase_history[6].phase)
-            self.assertEqual("code", task.phase_history[8].phase)
-            self.assertEqual("docs", task.phase_history[11].phase)
+            self.assertEqual("versioning", task.phase_history[7].phase)
+            self.assertEqual("code", task.phase_history[9].phase)
+            self.assertEqual("docs", task.phase_history[12].phase)
             self.assertIsNotNone(task.work_branch)
 
     def test_process_next_blocks_on_failed_phase(self) -> None:
@@ -171,7 +172,7 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(0, versioning.create_calls)
             self.assertEqual(0, versioning.guard_calls)
             self.assertEqual(0, calls["tool"])
-            self.assertIn("dry-run", task.phase_history[6].detail)
+            self.assertIn("dry-run", task.phase_history[7].detail)
             self.assertIn("dry-run", [p.detail for p in task.phase_history if p.phase == "execute"][0])
 
     def test_execute_blocks_untrusted_non_read_tool(self) -> None:
@@ -412,6 +413,7 @@ class SupervisorTests(unittest.TestCase):
                 "triage",
                 "router_gate",
                 "requirements",
+                "requirements_gate",
                 "versioning",
                 "plan",
                 "code",
@@ -485,6 +487,70 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual("blocked", task.status)
             self.assertEqual("budget", task.phase_history[-1].phase)
             self.assertIn("tool_budget", task.phase_history[-1].detail)
+
+    def test_requirements_gate_blocks_when_open_questions_remain(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = StateStore(Path(tmp) / "state.json")
+
+            def unclear_requirements(task: Task) -> PhaseResult:
+                task.agent_outputs["requirements"] = {
+                    "acceptance_criteria": ["feature works for authenticated users"],
+                    "non_goals": [],
+                    "open_questions": ["Should guests have read-only access?"],
+                }
+                return PhaseResult(
+                    phase="requirements",
+                    status="success",
+                    detail="requirements drafted",
+                    timestamp=time.time(),
+                )
+
+            supervisor = Supervisor(
+                queue=TaskQueue(),
+                state_store=store,
+                phase_handlers={"requirements": unclear_requirements},
+            )
+            supervisor.create_task("add access control")
+            task = supervisor.process_next()
+
+            assert task is not None
+            self.assertEqual("blocked", task.status)
+            self.assertEqual("requirements_gate", task.phase_history[-1].phase)
+            self.assertIn("requirements not clear", task.phase_history[-1].detail)
+            gate = task.agent_outputs["requirements_gate"]
+            self.assertFalse(gate["clear"])
+            self.assertEqual("request_clarification", gate["next_action"])
+
+    def test_requirements_gate_passes_when_requirements_are_clear(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = StateStore(Path(tmp) / "state.json")
+
+            def clear_requirements(task: Task) -> PhaseResult:
+                task.agent_outputs["requirements"] = {
+                    "acceptance_criteria": ["guest users see login CTA", "members can access dashboard"],
+                    "non_goals": [],
+                    "open_questions": [],
+                }
+                return PhaseResult(
+                    phase="requirements",
+                    status="success",
+                    detail="requirements complete",
+                    timestamp=time.time(),
+                )
+
+            supervisor = Supervisor(
+                queue=TaskQueue(),
+                state_store=store,
+                phase_handlers={"requirements": clear_requirements},
+            )
+            supervisor.create_task("implement auth routing")
+            task = supervisor.process_next()
+
+            assert task is not None
+            self.assertEqual("completed", task.status)
+            gate = task.agent_outputs["requirements_gate"]
+            self.assertTrue(gate["clear"])
+            self.assertEqual("proceed", gate["next_action"])
 
     def test_router_gate_uses_deeper_pipeline_on_low_confidence(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
