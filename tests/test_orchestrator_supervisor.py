@@ -77,19 +77,22 @@ class SupervisorTests(unittest.TestCase):
 
             assert task is not None
             self.assertEqual("completed", task.status)
-            self.assertEqual(26, len(task.phase_history))
+            self.assertEqual(29, len(task.phase_history))
             self.assertEqual("ingress_guard", task.phase_history[0].phase)
             self.assertEqual("budget_envelope", task.phase_history[1].phase)
             self.assertEqual("intent", task.phase_history[2].phase)
             self.assertEqual("router_gate", task.phase_history[4].phase)
             self.assertEqual("requirements_gate", task.phase_history[6].phase)
             self.assertEqual("finalize", task.phase_history[-1].phase)
-            self.assertEqual("health_gate", task.phase_history[-2].phase)
-            self.assertEqual("deploy_runner", task.phase_history[-3].phase)
-            self.assertEqual("release_rollout", task.phase_history[-4].phase)
-            self.assertEqual("gate_pre_merge", task.phase_history[-5].phase)
-            self.assertEqual("waiver_gate", task.phase_history[-6].phase)
-            self.assertEqual("human_checkpoints", task.phase_history[-7].phase)
+            self.assertEqual("access_gate", task.phase_history[-2].phase)
+            self.assertEqual("dr_gate", task.phase_history[-3].phase)
+            self.assertEqual("platform_health_gate", task.phase_history[-4].phase)
+            self.assertEqual("health_gate", task.phase_history[-5].phase)
+            self.assertEqual("deploy_runner", task.phase_history[-6].phase)
+            self.assertEqual("release_rollout", task.phase_history[-7].phase)
+            self.assertEqual("gate_pre_merge", task.phase_history[-8].phase)
+            self.assertEqual("waiver_gate", task.phase_history[-9].phase)
+            self.assertEqual("human_checkpoints", task.phase_history[-10].phase)
             self.assertEqual("versioning", task.phase_history[7].phase)
             self.assertEqual("code", task.phase_history[9].phase)
             self.assertEqual("security_gate", task.phase_history[12].phase)
@@ -498,6 +501,9 @@ class SupervisorTests(unittest.TestCase):
                 "release_rollout",
                 "deploy_runner",
                 "health_gate",
+                "platform_health_gate",
+                "dr_gate",
+                "access_gate",
                 "finalize",
             ]:
                 self.assertIn(phase, task.handoff_artifacts)
@@ -1241,6 +1247,130 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual("health_gate", task.phase_history[-1].phase)
             self.assertIn("auto rollback executed", task.phase_history[-1].detail)
             self.assertIn("auto_rollback", [e["event_type"] for e in logger.read_events()])
+
+    def test_platform_health_gate_engages_safe_mode_on_platform_issues(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            store = StateStore(tmp_path / "state.json")
+
+            def inject_platform_issues(task: Task) -> PhaseResult:
+                task.agent_outputs["observability"] = {
+                    "healthy": True,
+                    "failed_signals": [],
+                    "slo_status": "green",
+                }
+                task.agent_outputs["platform_health"] = {
+                    "healthy": False,
+                    "issues": ["router_accuracy_drop", "queue_backlog_spike"],
+                    "safe_mode_required": True,
+                }
+                return PhaseResult(
+                    phase="review",
+                    status="success",
+                    detail="platform issues seeded",
+                    timestamp=time.time(),
+                )
+
+            supervisor = Supervisor(
+                queue=TaskQueue(),
+                state_store=store,
+                phase_handlers={"review": inject_platform_issues},
+            )
+            supervisor.create_task("platform unhealthy")
+            task = supervisor.process_next()
+
+            assert task is not None
+            self.assertEqual("blocked", task.status)
+            self.assertEqual("platform_health_gate", task.phase_history[-1].phase)
+            self.assertTrue(task.safe_mode)
+            self.assertIn("safe mode engaged", task.phase_history[-1].detail)
+
+    def test_dr_gate_blocks_when_recovery_objectives_fail(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = StateStore(Path(tmp) / "state.json")
+
+            def inject_dr_fail(task: Task) -> PhaseResult:
+                task.agent_outputs["observability"] = {
+                    "healthy": True,
+                    "failed_signals": [],
+                    "slo_status": "green",
+                }
+                task.agent_outputs["platform_health"] = {
+                    "healthy": True,
+                    "issues": [],
+                    "safe_mode_required": False,
+                }
+                task.agent_outputs["dr"] = {
+                    "pass": False,
+                    "rto_seconds": 7200,
+                    "rpo_seconds": 3600,
+                    "failures": ["rto_exceeded", "rpo_exceeded"],
+                }
+                return PhaseResult(
+                    phase="review",
+                    status="success",
+                    detail="dr failure seeded",
+                    timestamp=time.time(),
+                )
+
+            supervisor = Supervisor(
+                queue=TaskQueue(),
+                state_store=store,
+                phase_handlers={"review": inject_dr_fail},
+            )
+            supervisor.create_task("dr failure")
+            task = supervisor.process_next()
+
+            assert task is not None
+            self.assertEqual("blocked", task.status)
+            self.assertEqual("dr_gate", task.phase_history[-1].phase)
+            self.assertIn("dr gate failed", task.phase_history[-1].detail)
+
+    def test_access_gate_blocks_on_policy_violations(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = StateStore(Path(tmp) / "state.json")
+
+            def inject_access_fail(task: Task) -> PhaseResult:
+                task.agent_outputs["observability"] = {
+                    "healthy": True,
+                    "failed_signals": [],
+                    "slo_status": "green",
+                }
+                task.agent_outputs["platform_health"] = {
+                    "healthy": True,
+                    "issues": [],
+                    "safe_mode_required": False,
+                }
+                task.agent_outputs["dr"] = {
+                    "pass": True,
+                    "rto_seconds": 60,
+                    "rpo_seconds": 30,
+                    "failures": [],
+                }
+                task.agent_outputs["access"] = {
+                    "compliant": False,
+                    "violations": ["stale_admin_role", "missing_recertification"],
+                    "recertified_principals": ["service-ci"],
+                }
+                return PhaseResult(
+                    phase="review",
+                    status="success",
+                    detail="access failure seeded",
+                    timestamp=time.time(),
+                )
+
+            supervisor = Supervisor(
+                queue=TaskQueue(),
+                state_store=store,
+                phase_handlers={"review": inject_access_fail},
+            )
+            supervisor.create_task("access noncompliance")
+            task = supervisor.process_next()
+
+            assert task is not None
+            self.assertEqual("blocked", task.status)
+            self.assertEqual("access_gate", task.phase_history[-1].phase)
+            self.assertIn("access gate failed", task.phase_history[-1].detail)
 
 
 if __name__ == "__main__":

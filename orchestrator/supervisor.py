@@ -200,6 +200,9 @@ class Supervisor:
             "release_rollout",
             "deploy_runner",
             "health_gate",
+            "platform_health_gate",
+            "dr_gate",
+            "access_gate",
             "finalize",
         ]
         self._ensure_phase_contract_coverage()
@@ -494,6 +497,12 @@ class Supervisor:
             return self._run_deploy_runner_phase(task)
         if phase == "health_gate":
             return self._run_health_gate_phase(task)
+        if phase == "platform_health_gate":
+            return self._run_platform_health_gate_phase(task)
+        if phase == "dr_gate":
+            return self._run_dr_gate_phase(task)
+        if phase == "access_gate":
+            return self._run_access_gate_phase(task)
 
         handler = self.phase_handlers.get(phase)
         if handler:
@@ -1221,6 +1230,115 @@ class Supervisor:
             timestamp=time.time(),
         )
 
+    def _run_platform_health_gate_phase(self, task: Task) -> PhaseResult:
+        payload = task.agent_outputs.get("platform_health", {})
+        if not isinstance(payload, dict):
+            payload = {}
+        raw_issues = payload.get("issues")
+        issues = (
+            [item.strip() for item in raw_issues if isinstance(item, str) and item.strip()]
+            if isinstance(raw_issues, list)
+            else []
+        )
+        healthy_flag = payload.get("healthy")
+        healthy = bool(healthy_flag) if isinstance(healthy_flag, bool) else not issues
+        safe_mode_required = bool(payload.get("safe_mode_required", not healthy))
+        task.agent_outputs["platform_health_gate"] = {
+            "healthy": healthy,
+            "issues": issues,
+            "safe_mode_required": safe_mode_required,
+        }
+        if not healthy:
+            if safe_mode_required:
+                task.safe_mode = True
+            return PhaseResult(
+                phase="platform_health_gate",
+                status="failed",
+                detail=(
+                    "platform health gate failed"
+                    + ("; safe mode engaged" if safe_mode_required else "")
+                    + (f" ({', '.join(issues)})" if issues else "")
+                ),
+                timestamp=time.time(),
+            )
+        return PhaseResult(
+            phase="platform_health_gate",
+            status="success",
+            detail="platform health gate passed",
+            timestamp=time.time(),
+        )
+
+    def _run_dr_gate_phase(self, task: Task) -> PhaseResult:
+        payload = task.agent_outputs.get("dr", {})
+        if not isinstance(payload, dict):
+            payload = {}
+        pass_value = payload.get("pass")
+        dr_pass = bool(pass_value) if isinstance(pass_value, bool) else True
+        rto = payload.get("rto_seconds")
+        rpo = payload.get("rpo_seconds")
+        raw_failures = payload.get("failures")
+        failures = (
+            [item.strip() for item in raw_failures if isinstance(item, str) and item.strip()]
+            if isinstance(raw_failures, list)
+            else []
+        )
+        task.agent_outputs["dr_gate"] = {
+            "pass": dr_pass,
+            "rto_seconds": int(rto) if isinstance(rto, (int, float)) else 0,
+            "rpo_seconds": int(rpo) if isinstance(rpo, (int, float)) else 0,
+            "failures": failures,
+        }
+        if not dr_pass:
+            return PhaseResult(
+                phase="dr_gate",
+                status="failed",
+                detail="dr gate failed" + (f": {', '.join(failures)}" if failures else ""),
+                timestamp=time.time(),
+            )
+        return PhaseResult(
+            phase="dr_gate",
+            status="success",
+            detail="dr gate passed",
+            timestamp=time.time(),
+        )
+
+    def _run_access_gate_phase(self, task: Task) -> PhaseResult:
+        payload = task.agent_outputs.get("access", {})
+        if not isinstance(payload, dict):
+            payload = {}
+        compliant_value = payload.get("compliant")
+        compliant = bool(compliant_value) if isinstance(compliant_value, bool) else True
+        raw_violations = payload.get("violations")
+        violations = (
+            [item.strip() for item in raw_violations if isinstance(item, str) and item.strip()]
+            if isinstance(raw_violations, list)
+            else []
+        )
+        raw_recertified = payload.get("recertified_principals")
+        recertified = (
+            [item.strip() for item in raw_recertified if isinstance(item, str) and item.strip()]
+            if isinstance(raw_recertified, list)
+            else []
+        )
+        task.agent_outputs["access_gate"] = {
+            "compliant": compliant,
+            "violations": violations,
+            "recertified_principals": recertified,
+        }
+        if not compliant:
+            return PhaseResult(
+                phase="access_gate",
+                status="failed",
+                detail="access gate failed" + (f": {', '.join(violations)}" if violations else ""),
+                timestamp=time.time(),
+            )
+        return PhaseResult(
+            phase="access_gate",
+            status="success",
+            detail="access gate passed",
+            timestamp=time.time(),
+        )
+
     def _run_human_checkpoints_phase(self, task: Task) -> PhaseResult:
         if self.approval_manager is None:
             task.agent_outputs["human_checkpoints"] = {
@@ -1415,6 +1533,12 @@ class Supervisor:
                 "rollout_complete": True,
                 "strategy": "canary",
             }
+        if phase == "platform_health_gate":
+            return {"healthy": True, "issues": [], "safe_mode_required": False}
+        if phase == "dr_gate":
+            return {"pass": True, "rto_seconds": 0, "rpo_seconds": 0, "failures": []}
+        if phase == "access_gate":
+            return {"compliant": True, "violations": [], "recertified_principals": []}
         if phase == "finalize":
             return {"outcome": "completed", "summary": "task finalized"}
         return {"phase": phase}
