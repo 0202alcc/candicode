@@ -60,7 +60,7 @@ index 8f585a450..f6024a610 100644
    },
    "theme": {
 diff --git a/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx b/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx
-index f5a7f6f6c..5f9230fd1 100644
+index f5a7f6f6c..9fbfd235d 100644
 --- a/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx
 +++ b/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx
 @@ -1196,30 +1196,38 @@ function UserMessage(props: {
@@ -243,7 +243,7 @@ index f5a7f6f6c..5f9230fd1 100644
        <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0}>
          <Switch>
            <Match when={Flag.OPENCODE_EXPERIMENTAL_MARKDOWN}>
-@@ -1415,10 +1473,311 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
+@@ -1415,10 +1473,357 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
            </Match>
          </Switch>
        </box>
@@ -941,7 +941,7 @@ index 56931b2ed..ae1daa1ea 100644
        }
      </style>
 diff --git a/packages/opencode/src/session/prompt.ts b/packages/opencode/src/session/prompt.ts
-index 75bd3c9df..3d1d28666 100644
+index 75bd3c9df..79f5862f5 100644
 --- a/packages/opencode/src/session/prompt.ts
 +++ b/packages/opencode/src/session/prompt.ts
 @@ -45,6 +45,7 @@ import { LLM } from "./llm"
@@ -952,7 +952,7 @@ index 75bd3c9df..3d1d28666 100644
  
  // @ts-ignore
  globalThis.AI_SDK_LOG_WARNINGS = false
-@@ -181,9 +182,411 @@ export namespace SessionPrompt {
+@@ -181,9 +182,414 @@ export namespace SessionPrompt {
        return message
      }
  
