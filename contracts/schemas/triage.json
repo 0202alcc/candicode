@@ -6,6 +6,7 @@
     "task_type": {"type": "string"},
     "risk_level": {"type": "string", "enum": ["low", "medium", "high"]},
     "scope_size": {"type": "string", "enum": ["small", "medium", "large"]},
-    "intensity": {"type": "string", "enum": ["fast", "normal", "deep"]}
+    "intensity": {"type": "string", "enum": ["fast", "normal", "deep"]},
+    "confidence_score": {"type": "number", "minimum": 0, "maximum": 1}
   }
 }

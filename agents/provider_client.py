@@ -143,7 +143,7 @@ class OpenAICompatibleHostedModelClient(HostedModelClient):
 def _schema_for_agent(agent_name: str) -> str:
     hints = {
         "intent_agent": '{"rewritten_prompt":"string","target_files":["string"],"success_criteria":["string"],"proposed_new_files":["string"]}',
-        "triage_agent": '{"task_type":"string","risk_level":"low|medium|high","scope_size":"small|medium|large","intensity":"fast|normal|deep"}',
+        "triage_agent": '{"task_type":"string","risk_level":"low|medium|high","scope_size":"small|medium|large","intensity":"fast|normal|deep","confidence_score":"0..1"}',
         "requirements_agent": '{"acceptance_criteria":["string"],"non_goals":["string"],"open_questions":["string"]}',
         "planner_agent": '{"steps":["string"],"test_plan":["string"],"risk_notes":["string"]}',
         "coder_agent": '{"changes":["string"],"files_touched":["string"],"file_edits":[{"path":"string","content":"string"}]}',

@@ -156,6 +156,7 @@ class Supervisor:
             "budget_envelope",
             "intent",
             "triage",
+            "router_gate",
             "requirements",
             "versioning",
             "plan",
@@ -414,6 +415,8 @@ class Supervisor:
             return self._run_ingress_guard_phase(task)
         if phase == "budget_envelope":
             return self._run_budget_envelope_phase(task)
+        if phase == "router_gate":
+            return self._run_router_gate_phase(task)
         if phase == "versioning":
             return self._run_versioning_phase(task)
         if phase == "execute":
@@ -497,6 +500,58 @@ class Supervisor:
                 "budget envelope set "
                 f"(tokens={task.budget_token_limit}, tools={task.budget_tool_limit}, time={task.budget_time_limit_seconds}s)"
             ),
+            timestamp=time.time(),
+        )
+
+    def _run_router_gate_phase(self, task: Task) -> PhaseResult:
+        triage_payload = task.agent_outputs.get("triage", {})
+        confidence = self._coerce_confidence_score(triage_payload)
+        threshold = 0.70
+        human_threshold = 0.35
+        allowed = confidence >= threshold
+        route = "normal"
+        failures: List[str] = []
+        if not allowed:
+            if confidence >= human_threshold:
+                route = "deeper_pipeline"
+                task.degraded_mode = True
+                failures.append("router_confidence_below_threshold")
+            else:
+                route = "human_triage"
+                task.degraded_mode = True
+                failures.append("router_confidence_requires_human_triage")
+
+        task.agent_outputs["router_gate"] = {
+            "allowed": allowed,
+            "confidence": confidence,
+            "threshold": threshold,
+            "route": route,
+            "failures": failures,
+        }
+        if route == "human_triage":
+            return PhaseResult(
+                phase="router_gate",
+                status="failed",
+                detail=(
+                    "router confidence below human-triage threshold; "
+                    f"confidence={confidence:.2f}, threshold={human_threshold:.2f}"
+                ),
+                timestamp=time.time(),
+            )
+        if route == "deeper_pipeline":
+            return PhaseResult(
+                phase="router_gate",
+                status="success",
+                detail=(
+                    "router confidence below threshold; using deeper pipeline fallback "
+                    f"(confidence={confidence:.2f}, threshold={threshold:.2f})"
+                ),
+                timestamp=time.time(),
+            )
+        return PhaseResult(
+            phase="router_gate",
+            status="success",
+            detail=f"router confidence passed threshold (confidence={confidence:.2f}, threshold={threshold:.2f})",
             timestamp=time.time(),
         )
 
@@ -801,6 +856,15 @@ class Supervisor:
                 "risk_level": "low",
                 "scope_size": "small",
                 "intensity": "normal",
+                "confidence_score": 0.9,
+            }
+        if phase == "router_gate":
+            return {
+                "allowed": True,
+                "confidence": 1.0,
+                "threshold": 0.7,
+                "route": "normal",
+                "failures": [],
             }
         if phase == "requirements":
             return {
@@ -968,3 +1032,18 @@ class Supervisor:
             except Exception:
                 total_chars += len(str(payload))
         return max(1, total_chars // 4)
+
+    @staticmethod
+    def _coerce_confidence_score(payload: Dict) -> float:
+        if not isinstance(payload, dict):
+            return 1.0
+        value = payload.get("confidence_score", payload.get("confidence", 1.0))
+        try:
+            score = float(value)
+        except (TypeError, ValueError):
+            return 1.0
+        if score < 0:
+            return 0.0
+        if score > 1:
+            return 1.0
+        return score

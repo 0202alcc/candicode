@@ -517,6 +517,7 @@ def _phase_agent_map() -> Dict[str, str]:
         {
             "ingress_guard": "ingress_guard(local)",
             "budget_envelope": "budget_envelope(local)",
+            "router_gate": "router_gate(local)",
             "versioning": "versioning_agent",
             "execute": "tool_runner(repo.write/repo.search)",
             "verify": "verification_runner",
@@ -534,6 +535,7 @@ def _phase_color_map() -> Dict[str, str]:
         "budget_envelope": "#F97316",
         "intent": "#FF5FA2",
         "triage": "#FF3B30",
+        "router_gate": "#EA580C",
         "requirements": "#FF8C00",
         "versioning": "#FFD60A",
         "plan": "#A3E635",

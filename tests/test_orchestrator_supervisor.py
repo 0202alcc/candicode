@@ -72,16 +72,17 @@ class SupervisorTests(unittest.TestCase):
 
             assert task is not None
             self.assertEqual("completed", task.status)
-            self.assertEqual(16, len(task.phase_history))
+            self.assertEqual(17, len(task.phase_history))
             self.assertEqual("ingress_guard", task.phase_history[0].phase)
             self.assertEqual("budget_envelope", task.phase_history[1].phase)
             self.assertEqual("intent", task.phase_history[2].phase)
+            self.assertEqual("router_gate", task.phase_history[4].phase)
             self.assertEqual("finalize", task.phase_history[-1].phase)
             self.assertEqual("gate_pre_merge", task.phase_history[-2].phase)
             self.assertEqual("human_checkpoints", task.phase_history[-3].phase)
-            self.assertEqual("versioning", task.phase_history[5].phase)
-            self.assertEqual("code", task.phase_history[7].phase)
-            self.assertEqual("docs", task.phase_history[10].phase)
+            self.assertEqual("versioning", task.phase_history[6].phase)
+            self.assertEqual("code", task.phase_history[8].phase)
+            self.assertEqual("docs", task.phase_history[11].phase)
             self.assertIsNotNone(task.work_branch)
 
     def test_process_next_blocks_on_failed_phase(self) -> None:
@@ -109,7 +110,14 @@ class SupervisorTests(unittest.TestCase):
             assert task is not None
             self.assertEqual("blocked", task.status)
             self.assertEqual(
-                ["ingress_guard", "budget_envelope", "intent", "triage", "requirements"],
+                [
+                    "ingress_guard",
+                    "budget_envelope",
+                    "intent",
+                    "triage",
+                    "router_gate",
+                    "requirements",
+                ],
                 [p.phase for p in task.phase_history],
             )
 
@@ -163,7 +171,7 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(0, versioning.create_calls)
             self.assertEqual(0, versioning.guard_calls)
             self.assertEqual(0, calls["tool"])
-            self.assertIn("dry-run", task.phase_history[5].detail)
+            self.assertIn("dry-run", task.phase_history[6].detail)
             self.assertIn("dry-run", [p.detail for p in task.phase_history if p.phase == "execute"][0])
 
     def test_execute_blocks_untrusted_non_read_tool(self) -> None:
@@ -402,6 +410,7 @@ class SupervisorTests(unittest.TestCase):
                 "budget_envelope",
                 "intent",
                 "triage",
+                "router_gate",
                 "requirements",
                 "versioning",
                 "plan",
@@ -476,6 +485,72 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual("blocked", task.status)
             self.assertEqual("budget", task.phase_history[-1].phase)
             self.assertIn("tool_budget", task.phase_history[-1].detail)
+
+    def test_router_gate_uses_deeper_pipeline_on_low_confidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = StateStore(Path(tmp) / "state.json")
+
+            def low_confidence_triage(task: Task) -> PhaseResult:
+                task.agent_outputs["triage"] = {
+                    "task_type": "bug",
+                    "risk_level": "medium",
+                    "scope_size": "medium",
+                    "intensity": "deep",
+                    "confidence_score": 0.5,
+                }
+                return PhaseResult(
+                    phase="triage",
+                    status="success",
+                    detail="triage low confidence",
+                    timestamp=time.time(),
+                )
+
+            supervisor = Supervisor(
+                queue=TaskQueue(),
+                state_store=store,
+                phase_handlers={"triage": low_confidence_triage},
+            )
+            supervisor.create_task("route via fallback")
+            task = supervisor.process_next()
+
+            assert task is not None
+            self.assertEqual("completed", task.status)
+            self.assertTrue(task.degraded_mode)
+            router = task.agent_outputs["router_gate"]
+            self.assertEqual("deeper_pipeline", router["route"])
+            self.assertFalse(router["allowed"])
+
+    def test_router_gate_blocks_when_human_triage_required(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = StateStore(Path(tmp) / "state.json")
+
+            def very_low_confidence_triage(task: Task) -> PhaseResult:
+                task.agent_outputs["triage"] = {
+                    "task_type": "bug",
+                    "risk_level": "high",
+                    "scope_size": "large",
+                    "intensity": "deep",
+                    "confidence_score": 0.2,
+                }
+                return PhaseResult(
+                    phase="triage",
+                    status="success",
+                    detail="triage very low confidence",
+                    timestamp=time.time(),
+                )
+
+            supervisor = Supervisor(
+                queue=TaskQueue(),
+                state_store=store,
+                phase_handlers={"triage": very_low_confidence_triage},
+            )
+            supervisor.create_task("needs human triage")
+            task = supervisor.process_next()
+
+            assert task is not None
+            self.assertEqual("blocked", task.status)
+            self.assertEqual("router_gate", task.phase_history[-1].phase)
+            self.assertIn("human-triage threshold", task.phase_history[-1].detail)
 
     def test_basic_agent_suite_handlers_integrate_with_supervisor(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
