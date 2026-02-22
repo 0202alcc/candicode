@@ -26,7 +26,7 @@ flowchart TD
 
   L --> M["LLM Planner: execution/risk/test/security plan"]
   M --> N["LLM Coder: minimal diff + strict file_edits/target_files enforcement (Implemented)"]
-  N --> O["Local Tool Runner: apply patch (repo.write/repo.search; new-file guard; basename resolve) (Implemented)"]
+  N --> O["Local Tool Runner: apply file_edits via repo.write/repo.search (new-file guard; basename resolve) (Implemented)"]
   O --> P["LLM Test Agent: generate/update tests"]
   P --> Q["Local CI: deterministic gate suite + flaky governance"]
   Q --> R{"Local Gate: CI pass?"}
@@ -87,7 +87,7 @@ flowchart TD
   ZZ -->|Yes| D
 
   %% Extra implemented bridge pieces
-  C --> BR1["Local Native Bridge: /model provider+model+auth/baseURL -> external pipeline env (Implemented)"]
+  C --> BR1["Local Native Bridge: /model provider+model+auth/baseURL -> external pipeline env (Implemented via patched OpenCode core)"]
   BR1 --> E
   ZB --> ST1["Local Runtime State: .opencode-pipeline/state.json persisted per workspace (Implemented)"]
 

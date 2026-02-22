@@ -1,3 +1,730 @@
+diff --git a/packages/opencode/src/cli/cmd/tui/context/theme/opencode.json b/packages/opencode/src/cli/cmd/tui/context/theme/opencode.json
+index 8f585a450..f6024a610 100644
+--- a/packages/opencode/src/cli/cmd/tui/context/theme/opencode.json
++++ b/packages/opencode/src/cli/cmd/tui/context/theme/opencode.json
+@@ -1,43 +1,43 @@
+ {
+   "$schema": "https://opencode.ai/theme.json",
+   "defs": {
+-    "darkStep1": "#0a0a0a",
+-    "darkStep2": "#141414",
+-    "darkStep3": "#1e1e1e",
++    "darkStep1": "#1f2a20",
++    "darkStep2": "#2a362b",
++    "darkStep3": "#344236",
+     "darkStep4": "#282828",
+     "darkStep5": "#323232",
+     "darkStep6": "#3c3c3c",
+     "darkStep7": "#484848",
+     "darkStep8": "#606060",
+-    "darkStep9": "#fab283",
++    "darkStep9": "#6f9474",
+     "darkStep10": "#ffc09f",
+     "darkStep11": "#808080",
+     "darkStep12": "#eeeeee",
+-    "darkSecondary": "#5c9cf5",
++    "darkSecondary": "#7ea882",
+     "darkAccent": "#9d7cd8",
+     "darkRed": "#e06c75",
+     "darkOrange": "#f5a742",
+     "darkGreen": "#7fd88f",
+-    "darkCyan": "#56b6c2",
++    "darkCyan": "#6fa58e",
+     "darkYellow": "#e5c07b",
+-    "lightStep1": "#ffffff",
+-    "lightStep2": "#fafafa",
+-    "lightStep3": "#f5f5f5",
++    "lightStep1": "#dce8d6",
++    "lightStep2": "#e7f0e2",
++    "lightStep3": "#f0f6ed",
+     "lightStep4": "#ebebeb",
+     "lightStep5": "#e1e1e1",
+     "lightStep6": "#d4d4d4",
+     "lightStep7": "#b8b8b8",
+     "lightStep8": "#a0a0a0",
+-    "lightStep9": "#3b7dd8",
+-    "lightStep10": "#2968c3",
++    "lightStep9": "#5f8a63",
++    "lightStep10": "#4f7653",
+     "lightStep11": "#8a8a8a",
+     "lightStep12": "#1a1a1a",
+-    "lightSecondary": "#7b5bb6",
++    "lightSecondary": "#6f9474",
+     "lightAccent": "#d68c27",
+     "lightRed": "#d1383d",
+     "lightOrange": "#d68c27",
+     "lightGreen": "#3d9a57",
+-    "lightCyan": "#318795",
++    "lightCyan": "#5a8f7a",
+     "lightYellow": "#b0851f"
+   },
+   "theme": {
+diff --git a/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx b/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx
+index f5a7f6f6c..5f9230fd1 100644
+--- a/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx
++++ b/packages/opencode/src/cli/cmd/tui/routes/session/index.tsx
+@@ -1196,30 +1196,38 @@ function UserMessage(props: {
+   return (
+     <>
+       <Show when={text()}>
+-        <box
+-          id={props.message.id}
+-          border={["left"]}
+-          borderColor={color()}
+-          customBorderChars={SplitBorder.customBorderChars}
+-          marginTop={props.index === 0 ? 0 : 1}
+-        >
++        <box id={props.message.id} marginTop={props.index === 0 ? 0 : 1} justifyContent="flex-end">
+           <box
+-            onMouseOver={() => {
+-              setHover(true)
+-            }}
+-            onMouseOut={() => {
+-              setHover(false)
+-            }}
+-            onMouseUp={props.onMouseUp}
+-            paddingTop={1}
+-            paddingBottom={1}
+-            paddingLeft={2}
+-            backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
+-            flexShrink={0}
++            border={["right"]}
++            borderColor={color()}
++            customBorderChars={SplitBorder.customBorderChars}
++            maxWidth="92%"
+           >
+-            <text fg={theme.text}>{text()?.text}</text>
++            <box
++              onMouseOver={() => {
++                setHover(true)
++              }}
++              onMouseOut={() => {
++                setHover(false)
++              }}
++              onMouseUp={props.onMouseUp}
++              paddingTop={1}
++              paddingBottom={1}
++              paddingRight={2}
++              backgroundColor={hover() ? theme.backgroundElement : theme.backgroundPanel}
++              alignItems="flex-end"
++              flexShrink={0}
++            >
++              <text fg={theme.text}>{text()?.text}</text>
+             <Show when={files().length}>
+-              <box flexDirection="row" paddingBottom={metadataVisible() ? 1 : 0} paddingTop={1} gap={1} flexWrap="wrap">
++              <box
++                flexDirection="row"
++                paddingBottom={metadataVisible() ? 1 : 0}
++                paddingTop={1}
++                gap={1}
++                flexWrap="wrap"
++                justifyContent="flex-end"
++              >
+                 <For each={files()}>
+                   {(file) => {
+                     const bg = createMemo(() => {
+@@ -1253,6 +1261,7 @@ function UserMessage(props: {
+                 <span style={{ bg: color(), fg: queuedFg(), bold: true }}> QUEUED </span>
+               </text>
+             </Show>
++            </box>
+           </box>
+         </box>
+       </Show>
+@@ -1286,6 +1295,22 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
+     if (!user || !user.time) return 0
+     return props.message.time.completed - user.time.created
+   })
++  const pipelineText = createMemo(() => {
++    for (const part of props.parts) {
++      if (part.type !== "text") continue
++      if (!part.synthetic) continue
++      const text = part.text?.trim()
++      if (text?.startsWith("[pipeline]")) return text
++    }
++    return undefined
++  })
++  const pipelineHeader = createMemo(() => parsePipelineHeader(pipelineText()))
++  const pipelineCards = createMemo(
++    () => parsePipelineRows((pipelineText() ?? "").split("\n").map((line) => line.trimEnd())).cards,
++  )
++  const nextQueue = createMemo(() => computePipelineQueue(pipelineCards(), pipelineHeader()?.phase))
++  const isPipelineMessage = createMemo(() => !!pipelineText())
++  const hasPipelineError = createMemo(() => pipelineHeader()?.status === "blocked" || pipelineHeader()?.status === "failed")
+ 
+   return (
+     <>
+@@ -1321,26 +1346,54 @@ function AssistantMessage(props: { message: AssistantMessage; parts: Part[]; las
+       <Switch>
+         <Match when={props.last || final() || props.message.error?.name === "MessageAbortedError"}>
+           <box paddingLeft={3}>
+-            <text marginTop={1}>
+-              <span
+-                style={{
+-                  fg:
+-                    props.message.error?.name === "MessageAbortedError"
+-                      ? theme.textMuted
+-                      : local.agent.color(props.message.agent),
+-                }}
+-              >
+-                ▣{" "}
+-              </span>{" "}
+-              <span style={{ fg: theme.text }}>{Locale.titlecase(props.message.mode)}</span>
+-              <span style={{ fg: theme.textMuted }}> · {props.message.modelID}</span>
+-              <Show when={duration()}>
+-                <span style={{ fg: theme.textMuted }}> · {Locale.duration(duration())}</span>
+-              </Show>
+-              <Show when={props.message.error?.name === "MessageAbortedError"}>
+-                <span style={{ fg: theme.textMuted }}> · interrupted</span>
+-              </Show>
+-            </text>
++            <Show
++              when={isPipelineMessage()}
++              fallback={
++                <text marginTop={1}>
++                  <span
++                    style={{
++                      fg:
++                        props.message.error?.name === "MessageAbortedError"
++                          ? theme.textMuted
++                          : local.agent.color(props.message.agent),
++                    }}
++                  >
++                    ▣{" "}
++                  </span>{" "}
++                  <span style={{ fg: theme.text }}>{Locale.titlecase(props.message.mode)}</span>
++                  <span style={{ fg: theme.textMuted }}> · {props.message.modelID}</span>
++                  <Show when={duration()}>
++                    <span style={{ fg: theme.textMuted }}> · {Locale.duration(duration())}</span>
++                  </Show>
++                  <Show when={props.message.error?.name === "MessageAbortedError"}>
++                    <span style={{ fg: theme.textMuted }}> · interrupted</span>
++                  </Show>
++                </text>
++              }
++            >
++              <Switch>
++                <Match when={props.message.error || hasPipelineError()}>
++                  <text marginTop={1} fg={theme.error}>
++                    ⓧ {props.message.error?.data?.message ?? pipelineHeader()?.status ?? "pipeline error"}
++                  </text>
++                </Match>
++                <Match when={pipelineHeader()?.status === "completed"}>
++                  <text marginTop={1}>
++                    <span style={{ fg: theme.success }}>▣ </span>
++                    <span style={{ fg: theme.text }}>Process complete</span>
++                    <Show when={duration()}>
++                      <span style={{ fg: theme.textMuted }}> · {Locale.duration(duration())}</span>
++                    </Show>
++                  </text>
++                </Match>
++                <Match when={true}>
++                  <text marginTop={1}>
++                    <span style={{ fg: theme.textMuted }}>● </span>
++                    <span style={{ fg: theme.textMuted }}>{nextQueue().join(", ") || "Working..."}</span>
++                  </text>
++                </Match>
++              </Switch>
++            </Show>
+           </box>
+         </Match>
+       </Switch>
+@@ -1390,8 +1443,13 @@ function ReasoningPart(props: { last: boolean; part: ReasoningPart; message: Ass
+ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMessage }) {
+   const ctx = use()
+   const { theme, syntax } = useTheme()
++  const isPipelineDebug = createMemo(() => props.part.synthetic && props.part.text.trim().startsWith("[pipeline]"))
+   return (
+     <Show when={props.part.text.trim()}>
++      <Show when={isPipelineDebug()}>
++        <PipelinePhaseFeed text={props.part.text.trim()} message={props.message} />
++      </Show>
++      <Show when={!isPipelineDebug()}>
+       <box id={"text-" + props.part.id} paddingLeft={3} marginTop={1} flexShrink={0}>
+         <Switch>
+           <Match when={Flag.OPENCODE_EXPERIMENTAL_MARKDOWN}>
+@@ -1415,10 +1473,311 @@ function TextPart(props: { last: boolean; part: TextPart; message: AssistantMess
+           </Match>
+         </Switch>
+       </box>
++      </Show>
+     </Show>
+   )
+ }
+ 
++function PipelinePhaseFeed(props: { text: string; message: AssistantMessage }) {
++  const { theme, syntax } = useTheme()
++
++  const rows = createMemo(() =>
++    props.text
++      .split("\n")
++      .map((line) => line.trimEnd())
++      .filter((line) => line.length > 0),
++  )
++
++  const modelLabel = createMemo(() => props.message.modelID || "unknown-model")
++  const parsed = createMemo(() => parsePipelineRows(rows()))
++
++  return (
++    <box paddingLeft={3} marginTop={1} gap={1}>
++      <For each={parsed().transientLogs}>
++        {(line) => (
++          <box
++            border={["left"]}
++            customBorderChars={SplitBorder.customBorderChars}
++            borderColor={theme.borderSubtle}
++            backgroundColor={theme.backgroundElement}
++            paddingTop={1}
++            paddingBottom={1}
++            paddingLeft={2}
++          >
++            <text fg={theme.textMuted}>{line}</text>
++          </box>
++        )}
++      </For>
++      <For each={parsed().cards}>
++        {(card) => (
++          <box
++            border={["left"]}
++            customBorderChars={SplitBorder.customBorderChars}
++            borderColor={card.color as any}
++            backgroundColor={theme.backgroundPanel}
++            paddingTop={1}
++            paddingBottom={1}
++            paddingLeft={2}
++          >
++            <code
++              filetype="markdown"
++              drawUnstyledText={false}
++              streaming={true}
++              syntaxStyle={syntax()}
++              content={formatPipelineCardBody(card.phase, card.output, card.status === "running" ? "---" : "None")}
++              fg={theme.text}
++            />
++            <text marginTop={1}>
++              <span style={{ fg: card.color as any }}>▣ </span>
++              <span style={{ fg: theme.text }}>{Locale.titlecase(card.phase)}</span>
++              <span style={{ fg: theme.textMuted }}> · {modelLabel()}</span>
++              <span style={{ fg: theme.textMuted }}> · {card.duration}</span>
++              <span style={{ fg: theme.textMuted }}> · [{card.status}]</span>
++            </text>
++          </box>
++        )}
++      </For>
++    </box>
++  )
++}
++
++type PipelinePhaseCard = {
++  phase: string
++  status: string
++  agent: string
++  color: string
++  duration: string
++  output?: unknown
++}
++
++type PipelineRows = {
++  cards: PipelinePhaseCard[]
++  transientLogs: string[]
++}
++
++function parsePipelineRows(lines: string[]): PipelineRows {
++  const order: string[] = []
++  const byPhase = new Map<string, PipelinePhaseCard>()
++  const transientLogs: string[] = []
++
++  const ensure = (phase: string) => {
++    const key = phase.trim()
++    if (!byPhase.has(key)) {
++      byPhase.set(key, {
++        phase: key,
++        status: "running",
++        agent: "unmapped",
++        color: "#94A3B8",
++        duration: "0ms",
++      })
++      order.push(key)
++    }
++    return byPhase.get(key)!
++  }
++
++  for (let index = 0; index < lines.length; index += 1) {
++    const line = lines[index]
++    const phaseMatch = line.match(
++      /^-\s+(?:\S+\s+)?([a-z_]+)\s+\[([a-z_]+)\]\s+agent=([^ ]+)(?:\s+color=(#[0-9A-Fa-f]{6}))?(?:\s+duration=([0-9.]+(?:ms|s|m)))?/,
++    )
++    if (!phaseMatch) continue
++    const phase = phaseMatch[1]
++    const status = phaseMatch[2]
++    const agent = phaseMatch[3]
++    const color = phaseMatch[4]
++    const duration = phaseMatch[5]
++    if (phase === "model_switch") {
++      const detailLine = lines[index + 1]?.trimStart()
++      if (detailLine && detailLine.startsWith("output:")) {
++        const detailRaw = detailLine.replace(/^output:\s*/, "")
++        const detailParsed = parsePipelineOutput(detailRaw)
++        transientLogs.push(`model switch: ${formatInlineValue(detailParsed)}`)
++        index += 1
++      } else {
++        transientLogs.push(`model switch: ${status}${duration ? ` · ${duration}` : ""}`)
++      }
++      continue
++    }
++    const card = ensure(phase)
++    card.agent = agent
++    if (color) card.color = color
++    if (status !== "output") {
++      card.status = status
++      if (duration) card.duration = duration
++      continue
++    }
++    const outputLine = lines[index + 1]?.trimStart()
++    if (outputLine && outputLine.startsWith("output:")) {
++      card.output = parsePipelineOutput(outputLine.replace(/^output:\s*/, ""))
++      index += 1
++    }
++  }
++
++  return { cards: order.map((phase) => byPhase.get(phase)!), transientLogs }
++}
++
++function parsePipelineOutput(raw: string): unknown {
++  try {
++    return JSON.parse(raw)
++  } catch {
++    return raw
++  }
++}
++
++function formatPipelineCardBody(phase: string, output: unknown, emptyValue: string): string {
++  const obj = output && typeof output === "object" && !Array.isArray(output) ? (output as Record<string, unknown>) : {}
++  switch (phase) {
++    case "intent":
++      return sectioned([
++        section("Composed the rewritten prompt", obj.rewritten_prompt, emptyValue),
++        section("Proposed success criteria", obj.success_criteria, emptyValue),
++        section("Identified target files", obj.target_files, emptyValue),
++        section("Proposed new files", obj.proposed_new_files, emptyValue),
++      ])
++    case "triage":
++      return sectioned([
++        section("Categorized task intensity", obj.intensity, emptyValue),
++        section("Categorized risk level", obj.risk_level, emptyValue),
++        section("Categorized scope size", obj.scope_size, emptyValue),
++        section("Identified task type", obj.task_type, emptyValue),
++      ])
++    case "requirements":
++      return sectioned([
++        section("Proposed acceptance criteria", obj.acceptance_criteria, emptyValue),
++        section("Non goals", obj.non_goals, emptyValue),
++        section("Open questions", obj.open_questions, emptyValue),
++      ])
++    case "versioning":
++      return sectioned([section("Chosen work branch", obj.work_branch, emptyValue)])
++    case "plan":
++      return sectioned([
++        section("Outlined steps", obj.steps, emptyValue),
++        section("Risk notes", obj.risk_notes, emptyValue),
++        section("Proposed test plans", obj.test_plan, emptyValue),
++      ])
++    case "code":
++      return sectioned([
++        section("Changes made", obj.changes, emptyValue),
++        section("Files edited", obj.file_edits, emptyValue),
++        section("Files touched", obj.files_touched, emptyValue),
++      ])
++    case "test":
++      return sectioned([
++        section("Tests added", obj.tests_added, emptyValue),
++        section("Checks to run", obj.checks_to_run, emptyValue),
++      ])
++    case "review":
++      return sectioned([
++        section("Review findings", obj.findings, emptyValue),
++        section("Required fixes", obj.required_fixes, emptyValue),
++        section("Risk summary", obj.risk_summary, emptyValue),
++      ])
++    case "docs":
++      return sectioned([
++        section("Changelog", obj.changelog, emptyValue),
++        section("Migration notes", obj.migration_notes, emptyValue),
++        section("Runbook delta", obj.runbook_delta, emptyValue),
++      ])
++    case "execute":
++      return sectioned([
++        section("Execution changes", obj.changes, emptyValue),
++        section("Tools used", obj.tools_used, emptyValue),
++      ])
++    case "verify":
++      return sectioned([
++        section("Verification checks", obj.checks, emptyValue),
++        section("Flaky quarantined", obj.flaky_quarantined, emptyValue),
++        section("Retry counts", obj.retry_counts, emptyValue),
++        section("Verification status", obj.status, emptyValue),
++      ])
++    case "human_checkpoints":
++      return sectioned([
++        section("Approved", obj.approved, emptyValue),
++        section("Missing checkpoints", obj.missing, emptyValue),
++      ])
++    case "gate_pre_merge":
++      return sectioned([
++        section("Allowed", obj.allowed, emptyValue),
++        section("Policy failures", obj.failures, emptyValue),
++      ])
++    case "finalize":
++      return sectioned([section("Outcome", obj.outcome, emptyValue), section("Summary", obj.summary, emptyValue)])
++    default:
++      return sectioned([section("Output", output, emptyValue)])
++  }
++}
++
++function section(title: string, value: unknown, emptyValue: string): string {
++  const lines = formatValueLines(value, emptyValue)
++  return `# ${title}:\n${lines.join("\n")}`
++}
++
++function sectioned(parts: string[]): string {
++  return parts.join("\n\n")
++}
++
++function formatValueLines(value: unknown, emptyValue: string): string[] {
++  if (value === undefined || value === null) return [emptyValue]
++  if (typeof value === "string") return [value.trim() ? value : emptyValue]
++  if (typeof value === "number" || typeof value === "boolean") return [String(value)]
++  if (Array.isArray(value)) {
++    if (value.length === 0) return [emptyValue]
++    return value.map((item) => `- ${formatInlineValue(item)}`)
++  }
++  if (typeof value === "object") {
++    const keys = Object.keys(value as Record<string, unknown>)
++    if (keys.length === 0) return [emptyValue]
++    return [JSON.stringify(value)]
++  }
++  return [String(value)]
++}
++
++function formatInlineValue(value: unknown): string {
++  if (value === undefined || value === null) return "None"
++  if (typeof value === "string") return value.trim() ? value : "None"
++  if (typeof value === "number" || typeof value === "boolean") return String(value)
++  return JSON.stringify(value)
++}
++
++function parsePipelineHeader(
++  text?: string,
++): {
++  status: string
++  phase: string
++} | undefined {
++  if (!text) return undefined
++  const first = text.split("\n")[0]?.trim()
++  if (!first) return undefined
++  const match = first.match(/^\[pipeline\]\s+status=([a-z_]+)\s+phase=([a-z_]+)/i)
++  if (!match) return undefined
++  return { status: match[1], phase: match[2] }
++}
++
++function computePipelineQueue(cards: PipelinePhaseCard[], currentPhase?: string): string[] {
++  const order = [
++    "intent",
++    "triage",
++    "requirements",
++    "versioning",
++    "plan",
++    "code",
++    "test",
++    "review",
++    "docs",
++    "execute",
++    "verify",
++    "human_checkpoints",
++    "gate_pre_merge",
++    "finalize",
++  ]
++  const statusByPhase = new Map(cards.map((card) => [card.phase, card.status]))
++  const idx = currentPhase ? Math.max(0, order.indexOf(currentPhase)) : 0
++  return order
++    .slice(idx)
++    .filter((phase) => statusByPhase.get(phase) !== "success")
++    .map((phase) => Locale.titlecase(phase))
++}
++
+ // Pending messages moved to individual tool pending functions
+ 
+ function ToolPart(props: { last: boolean; part: ToolPart; message: AssistantMessage }) {
+diff --git a/packages/opencode/src/cli/cmd/tui/routes/session/sidebar.tsx b/packages/opencode/src/cli/cmd/tui/routes/session/sidebar.tsx
+index 42ac5fbe0..a1dcd6e63 100644
+--- a/packages/opencode/src/cli/cmd/tui/routes/session/sidebar.tsx
++++ b/packages/opencode/src/cli/cmd/tui/routes/session/sidebar.tsx
+@@ -80,6 +80,19 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
+         paddingRight={2}
+         position={props.overlay ? "absolute" : "relative"}
+       >
++        <box
++          flexShrink={0}
++          height={12}
++          border={["left"]}
++          borderColor={theme.borderSubtle}
++          paddingLeft={2}
++          gap={1}
++        >
++          <text fg={theme.textMuted}>
++            <b>Mermaid</b>
++          </text>
++          <text fg={theme.textMuted}>Reserved visualization area</text>
++        </box>
+         <scrollbox
+           flexGrow={1}
+           verticalScrollbarOptions={{
+@@ -90,22 +103,6 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
+           }}
+         >
+           <box flexShrink={0} gap={1} paddingRight={1}>
+-            <box paddingRight={1}>
+-              <text fg={theme.text}>
+-                <b>{session().title}</b>
+-              </text>
+-              <Show when={session().share?.url}>
+-                <text fg={theme.textMuted}>{session().share!.url}</text>
+-              </Show>
+-            </box>
+-            <box>
+-              <text fg={theme.text}>
+-                <b>Context</b>
+-              </text>
+-              <text fg={theme.textMuted}>{context()?.tokens ?? 0} tokens</text>
+-              <text fg={theme.textMuted}>{context()?.percentage ?? 0}% used</text>
+-              <text fg={theme.textMuted}>{cost()} spent</text>
+-            </box>
+             <Show when={mcpEntries().length > 0}>
+               <box>
+                 <box
+@@ -167,49 +164,6 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
+                 </Show>
+               </box>
+             </Show>
+-            <box>
+-              <box
+-                flexDirection="row"
+-                gap={1}
+-                onMouseDown={() => sync.data.lsp.length > 2 && setExpanded("lsp", !expanded.lsp)}
+-              >
+-                <Show when={sync.data.lsp.length > 2}>
+-                  <text fg={theme.text}>{expanded.lsp ? "▼" : "▶"}</text>
+-                </Show>
+-                <text fg={theme.text}>
+-                  <b>LSP</b>
+-                </text>
+-              </box>
+-              <Show when={sync.data.lsp.length <= 2 || expanded.lsp}>
+-                <Show when={sync.data.lsp.length === 0}>
+-                  <text fg={theme.textMuted}>
+-                    {sync.data.config.lsp === false
+-                      ? "LSPs have been disabled in settings"
+-                      : "LSPs will activate as files are read"}
+-                  </text>
+-                </Show>
+-                <For each={sync.data.lsp}>
+-                  {(item) => (
+-                    <box flexDirection="row" gap={1}>
+-                      <text
+-                        flexShrink={0}
+-                        style={{
+-                          fg: {
+-                            connected: theme.success,
+-                            error: theme.error,
+-                          }[item.status],
+-                        }}
+-                      >
+-                        •
+-                      </text>
+-                      <text fg={theme.textMuted}>
+-                        {item.id} {item.root}
+-                      </text>
+-                    </box>
+-                  )}
+-                </For>
+-              </Show>
+-            </box>
+             <Show when={todo().length > 0 && todo().some((t) => t.status !== "completed")}>
+               <box>
+                 <box
+@@ -270,6 +224,63 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
+         </scrollbox>
+ 
+         <box flexShrink={0} gap={1} paddingTop={1}>
++          <box paddingRight={1}>
++            <text fg={theme.text}>
++              <b>{session().title}</b>
++            </text>
++            <Show when={session().share?.url}>
++              <text fg={theme.textMuted}>{session().share!.url}</text>
++            </Show>
++          </box>
++          <box>
++            <text fg={theme.text}>
++              <b>Context</b>
++            </text>
++            <text fg={theme.textMuted}>{context()?.tokens ?? 0} tokens</text>
++            <text fg={theme.textMuted}>{context()?.percentage ?? 0}% used</text>
++            <text fg={theme.textMuted}>{cost()} spent</text>
++          </box>
++          <box>
++            <box
++              flexDirection="row"
++              gap={1}
++              onMouseDown={() => sync.data.lsp.length > 2 && setExpanded("lsp", !expanded.lsp)}
++            >
++              <Show when={sync.data.lsp.length > 2}>
++                <text fg={theme.text}>{expanded.lsp ? "▼" : "▶"}</text>
++              </Show>
++              <text fg={theme.text}>
++                <b>LSP</b>
++              </text>
++            </box>
++            <Show when={sync.data.lsp.length <= 2 || expanded.lsp}>
++              <Show when={sync.data.lsp.length === 0}>
++                <text fg={theme.textMuted}>
++                  {sync.data.config.lsp === false ? "LSPs have been disabled in settings" : "LSPs will activate as files are read"}
++                </text>
++              </Show>
++              <For each={sync.data.lsp}>
++                {(item) => (
++                  <box flexDirection="row" gap={1}>
++                    <text
++                      flexShrink={0}
++                      style={{
++                        fg: {
++                          connected: theme.success,
++                          error: theme.error,
++                        }[item.status],
++                      }}
++                    >
++                      •
++                    </text>
++                    <text fg={theme.textMuted}>
++                      {item.id} {item.root}
++                    </text>
++                  </box>
++                )}
++              </For>
++            </Show>
++          </box>
+           <Show when={!hasProviders() && !gettingStartedDismissed()}>
+             <box
+               backgroundColor={theme.backgroundElement}
+@@ -308,7 +319,7 @@ export function Sidebar(props: { sessionID: string; overlay?: boolean }) {
+             <span style={{ fg: theme.text }}>{directory().split("/").at(-1)}</span>
+           </text>
+           <text fg={theme.textMuted}>
+-            <span style={{ fg: theme.success }}>•</span> <b>Open</b>
++            <span style={{ fg: theme.success }}>•</span> <b>Candi</b>
+             <span style={{ fg: theme.text }}>
+               <b>Code</b>
+             </span>{" "}
 diff --git a/packages/opencode/src/cli/logo.ts b/packages/opencode/src/cli/logo.ts
 index 44fb93c15..9a494b860 100644
 --- a/packages/opencode/src/cli/logo.ts
@@ -45,8 +772,130 @@ index 655156588..ec70000e7 100644
        version: Installation.VERSION,
        args: process.argv.slice(2),
      })
+diff --git a/packages/opencode/src/mcp/oauth-callback.ts b/packages/opencode/src/mcp/oauth-callback.ts
+index bb3b56f2e..926f87bac 100644
+--- a/packages/opencode/src/mcp/oauth-callback.ts
++++ b/packages/opencode/src/mcp/oauth-callback.ts
+@@ -8,10 +8,10 @@ const HTML_SUCCESS = `<!DOCTYPE html>
+ <head>
+   <title>OpenCode - Authorization Successful</title>
+   <style>
+-    body { font-family: system-ui, -apple-system, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #1a1a2e; color: #eee; }
++    body { font-family: "Comic Mono", "ComicMono", "SF Mono", ui-monospace, monospace; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #dce8d6; color: #1f2a20; }
+     .container { text-align: center; padding: 2rem; }
+-    h1 { color: #4ade80; margin-bottom: 1rem; }
+-    p { color: #aaa; }
++    h1 { color: #2f6d3a; margin-bottom: 1rem; }
++    p { color: #4f6652; }
+   </style>
+ </head>
+ <body>
+@@ -28,11 +28,11 @@ const HTML_ERROR = (error: string) => `<!DOCTYPE html>
+ <head>
+   <title>OpenCode - Authorization Failed</title>
+   <style>
+-    body { font-family: system-ui, -apple-system, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #1a1a2e; color: #eee; }
++    body { font-family: "Comic Mono", "ComicMono", "SF Mono", ui-monospace, monospace; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: #dce8d6; color: #1f2a20; }
+     .container { text-align: center; padding: 2rem; }
+-    h1 { color: #f87171; margin-bottom: 1rem; }
+-    p { color: #aaa; }
+-    .error { color: #fca5a5; font-family: monospace; margin-top: 1rem; padding: 1rem; background: rgba(248,113,113,0.1); border-radius: 0.5rem; }
++    h1 { color: #9f2f2f; margin-bottom: 1rem; }
++    p { color: #4f6652; }
++    .error { color: #7b1f1f; font-family: "Comic Mono", "ComicMono", "SF Mono", ui-monospace, monospace; margin-top: 1rem; padding: 1rem; background: #c8dcbf; border-radius: 0.5rem; }
+   </style>
+ </head>
+ <body>
+diff --git a/packages/opencode/src/plugin/codex.ts b/packages/opencode/src/plugin/codex.ts
+index 56931b2ed..ae1daa1ea 100644
+--- a/packages/opencode/src/plugin/codex.ts
++++ b/packages/opencode/src/plugin/codex.ts
+@@ -149,27 +149,29 @@ const HTML_SUCCESS = `<!doctype html>
+     <style>
+       body {
+         font-family:
+-          system-ui,
+-          -apple-system,
+-          sans-serif;
++          "Comic Mono",
++          "ComicMono",
++          "SF Mono",
++          ui-monospace,
++          monospace;
+         display: flex;
+         justify-content: center;
+         align-items: center;
+         height: 100vh;
+         margin: 0;
+-        background: #131010;
+-        color: #f1ecec;
++        background: #dce8d6;
++        color: #1f2a20;
+       }
+       .container {
+         text-align: center;
+         padding: 2rem;
+       }
+       h1 {
+-        color: #f1ecec;
++        color: #1f2a20;
+         margin-bottom: 1rem;
+       }
+       p {
+-        color: #b7b1b1;
++        color: #4f6652;
+       }
+     </style>
+   </head>
+@@ -191,34 +193,36 @@ const HTML_ERROR = (error: string) => `<!doctype html>
+     <style>
+       body {
+         font-family:
+-          system-ui,
+-          -apple-system,
+-          sans-serif;
++          "Comic Mono",
++          "ComicMono",
++          "SF Mono",
++          ui-monospace,
++          monospace;
+         display: flex;
+         justify-content: center;
+         align-items: center;
+         height: 100vh;
+         margin: 0;
+-        background: #131010;
+-        color: #f1ecec;
++        background: #dce8d6;
++        color: #1f2a20;
+       }
+       .container {
+         text-align: center;
+         padding: 2rem;
+       }
+       h1 {
+-        color: #fc533a;
++        color: #9f2f2f;
+         margin-bottom: 1rem;
+       }
+       p {
+-        color: #b7b1b1;
++        color: #4f6652;
+       }
+       .error {
+-        color: #ff917b;
+-        font-family: monospace;
++        color: #7b1f1f;
++        font-family: "Comic Mono", "ComicMono", "SF Mono", ui-monospace, monospace;
+         margin-top: 1rem;
+         padding: 1rem;
+-        background: #3c140d;
++        background: #c8dcbf;
+         border-radius: 0.5rem;
+       }
+     </style>
 diff --git a/packages/opencode/src/session/prompt.ts b/packages/opencode/src/session/prompt.ts
-index 75bd3c9df..b1c41bb63 100644
+index 75bd3c9df..3d1d28666 100644
 --- a/packages/opencode/src/session/prompt.ts
 +++ b/packages/opencode/src/session/prompt.ts
 @@ -45,6 +45,7 @@ import { LLM } from "./llm"
@@ -57,7 +906,7 @@ index 75bd3c9df..b1c41bb63 100644
  
  // @ts-ignore
  globalThis.AI_SDK_LOG_WARNINGS = false
-@@ -181,9 +182,240 @@ export namespace SessionPrompt {
+@@ -181,9 +182,411 @@ export namespace SessionPrompt {
        return message
      }
  
@@ -107,45 +956,7 @@ index 75bd3c9df..b1c41bb63 100644
 +        })
 +      }
 +    }
-+    const proc = Bun.spawn({
-+      cmd,
-+      cwd: Instance.directory,
-+      env,
-+      stdout: "pipe",
-+      stderr: "pipe",
-+    })
-+    const timeoutMs = Math.max(1000, Number(process.env.OPENCODE_PIPELINE_TIMEOUT_MS ?? "120000"))
-+    const [stdout, stderr, exit] = await Promise.all([
-+      new Response(proc.stdout).text(),
-+      new Response(proc.stderr).text(),
-+      (async () => {
-+        let timer: Timer | undefined
-+        try {
-+          return await Promise.race<
-+            { kind: "exit"; code: number } | { kind: "timeout" }
-+          >([
-+            proc.exited.then((code) => ({ kind: "exit", code })),
-+            new Promise((resolve) => {
-+              timer = setTimeout(() => resolve({ kind: "timeout" as const }), timeoutMs)
-+            }),
-+          ])
-+        } finally {
-+          if (timer) clearTimeout(timer)
-+        }
-+      })(),
-+    ])
-+    if (exit.kind === "timeout") {
-+      proc.kill()
-+      throw new Error(`external pipeline timed out after ${timeoutMs}ms`)
-+    }
-+    const code = exit.code
-+    if (code !== 0) {
-+      throw new Error(
-+        `external pipeline failed (exit ${code})${stderr ? `: ${stderr.trim()}` : ""}`,
-+      )
-+    }
 +
-+    const parsed = parseExternalResponse(stdout)
 +    const model = user.info.role === "user" ? user.info.model : { providerID: "unknown", modelID: "unknown" }
 +    const agent = user.info.role === "user" ? user.info.agent : input.agent ?? "build"
 +    const variant = user.info.role === "user" ? user.info.variant : undefined
@@ -184,22 +995,159 @@ index 75bd3c9df..b1c41bb63 100644
 +      id: Identifier.ascending("part"),
 +      messageID: assistant.id,
 +      sessionID: input.sessionID,
-+      text: [
-+        `[pipeline] status=${parsed.status} phase=${parsed.final_phase}`,
-+        formatPipelineProgress(parsed.phase_history, parsed.phase_agent_map),
-+        parsed.final_detail,
-+        parsed.provenance_bundle_path
-+          ? `provenance: ${parsed.provenance_bundle_path}`
-+          : undefined,
-+      ]
-+        .filter(Boolean)
-+        .join("\n"),
++      text: "[pipeline] status=running phase=entrypoint\npipeline progress:\n- entrypoint [running] agent=opencode_entrypoint",
 +      synthetic: true,
 +      time: {
 +        start: Date.now(),
 +        end: Date.now(),
 +      },
 +    }
++    await Session.updatePart(textPart)
++
++    const proc = Bun.spawn({
++      cmd,
++      cwd: Instance.directory,
++      env,
++      stdout: "pipe",
++      stderr: "pipe",
++    })
++
++    const liveEvents: {
++      phase: string
++      status: string
++      detail: string
++      timestamp?: number
++      duration_ms?: number
++      agent?: string
++      color?: string
++      output?: unknown
++    }[] = []
++    const stderrLines: string[] = []
++    const updateLivePart = async () => {
++      const phaseAgentMap = Object.fromEntries(
++        liveEvents.filter((evt) => evt.agent).map((evt) => [evt.phase, evt.agent ?? "unmapped"]),
++      )
++      const phaseColorMap = Object.fromEntries(
++        liveEvents.filter((evt) => evt.color).map((evt) => [evt.phase, evt.color ?? "#94A3B8"]),
++      )
++      textPart.text = [
++        `[pipeline] status=running phase=${liveEvents.length > 0 ? liveEvents[liveEvents.length - 1].phase : "entrypoint"}`,
++        formatPipelineProgress(
++          liveEvents.map((evt) => ({
++            phase: evt.phase,
++            status: evt.status,
++            detail: evt.detail,
++            duration_ms: evt.duration_ms,
++            output: evt.output,
++          })),
++          phaseAgentMap,
++          phaseColorMap,
++        ),
++      ]
++        .filter(Boolean)
++        .join("\n")
++      if (textPart.time) textPart.time.end = Date.now()
++      await Session.updatePart(textPart)
++    }
++    const stderrTask = (async () => {
++      if (!proc.stderr) return
++      const reader = proc.stderr.getReader()
++      const decoder = new TextDecoder()
++      let buffer = ""
++      while (true) {
++        const { done, value } = await reader.read()
++        if (done) break
++        buffer += decoder.decode(value, { stream: true })
++        let nl = buffer.indexOf("\n")
++        while (nl >= 0) {
++          const line = buffer.slice(0, nl).trim()
++          buffer = buffer.slice(nl + 1)
++          const progress = parsePipelineProgressLine(line)
++          if (progress) {
++            liveEvents.push(progress)
++            await updateLivePart()
++          } else if (line) {
++            stderrLines.push(line)
++          }
++          nl = buffer.indexOf("\n")
++        }
++      }
++      const tail = buffer.trim()
++      if (tail) {
++        const progress = parsePipelineProgressLine(tail)
++        if (progress) {
++          liveEvents.push(progress)
++          await updateLivePart()
++        } else {
++          stderrLines.push(tail)
++        }
++      }
++    })()
++
++    const timeoutMs = Math.max(1000, Number(process.env.OPENCODE_PIPELINE_TIMEOUT_MS ?? "120000"))
++    const [stdout, exit] = await Promise.all([
++      new Response(proc.stdout).text(),
++      (async () => {
++        let timer: Timer | undefined
++        try {
++          return await Promise.race<
++            { kind: "exit"; code: number } | { kind: "timeout" }
++          >([
++            proc.exited.then((code) => ({ kind: "exit", code })),
++            new Promise((resolve) => {
++              timer = setTimeout(() => resolve({ kind: "timeout" as const }), timeoutMs)
++            }),
++          ])
++        } finally {
++          if (timer) clearTimeout(timer)
++        }
++      })(),
++    ])
++    await stderrTask
++    if (exit.kind === "timeout") {
++      proc.kill()
++      throw new Error(`external pipeline timed out after ${timeoutMs}ms`)
++    }
++    const code = exit.code
++    if (code !== 0) {
++      throw new Error(
++        `external pipeline failed (exit ${code})${stderrLines.length > 0 ? `: ${stderrLines.join(" | ")}` : ""}`,
++      )
++    }
++
++    const parsed = parseExternalResponse(stdout)
++    assistant.time.completed = Date.now()
++    await Session.updateMessage(assistant)
++
++    const fallbackHistory = liveEvents.map((evt) => ({
++      phase: evt.phase,
++      status: evt.status,
++      detail: evt.detail,
++      duration_ms: evt.duration_ms,
++      output: evt.output,
++    }))
++    const fallbackPhaseMap = Object.fromEntries(
++      liveEvents.filter((evt) => evt.agent).map((evt) => [evt.phase, evt.agent ?? "unmapped"]),
++    )
++    const fallbackColorMap = Object.fromEntries(
++      liveEvents.filter((evt) => evt.color).map((evt) => [evt.phase, evt.color ?? "#94A3B8"]),
++    )
++    // Keep live events as the primary rendering source so phase durations are preserved.
++    // Parsed stdout history currently does not guarantee duration fields.
++    const mergedHistory = fallbackHistory
++    textPart.text = [
++      `[pipeline] status=${parsed.status} phase=${parsed.final_phase}`,
++      formatPipelineProgress(
++        mergedHistory,
++        parsed.phase_agent_map ?? fallbackPhaseMap,
++        parsed.phase_color_map ?? fallbackColorMap,
++      ) ?? formatPipelineProgress(fallbackHistory, fallbackPhaseMap, fallbackColorMap),
++      parsed.final_detail,
++      parsed.provenance_bundle_path ? `provenance: ${parsed.provenance_bundle_path}` : undefined,
++    ]
++      .filter(Boolean)
++      .join("\n")
++    if (textPart.time) textPart.time.end = Date.now()
 +    await Session.updatePart(textPart)
 +    return { info: assistant, parts: [textPart] }
 +  }
@@ -249,6 +1197,7 @@ index 75bd3c9df..b1c41bb63 100644
 +    provenance_bundle_path?: string | null
 +    phase_history?: { phase: string; status: string; detail: string; timestamp?: number }[]
 +    phase_agent_map?: Record<string, string>
++    phase_color_map?: Record<string, string>
 +  } {
 +    try {
 +      const parsed = JSON.parse(stdout.trim())
@@ -264,6 +1213,8 @@ index 75bd3c9df..b1c41bb63 100644
 +        : undefined
 +      const phaseAgentMap =
 +        parsed.phase_agent_map && typeof parsed.phase_agent_map === "object" ? parsed.phase_agent_map : undefined
++      const phaseColorMap =
++        parsed.phase_color_map && typeof parsed.phase_color_map === "object" ? parsed.phase_color_map : undefined
 +      return {
 +        status: String(parsed.status ?? "unknown"),
 +        final_phase: String(parsed.final_phase ?? "unknown"),
@@ -274,6 +1225,7 @@ index 75bd3c9df..b1c41bb63 100644
 +            : parsed.provenance_bundle_path,
 +        phase_history: phaseHistory,
 +        phase_agent_map: phaseAgentMap,
++        phase_color_map: phaseColorMap,
 +      }
 +    } catch (error) {
 +      throw new Error(
@@ -283,16 +1235,84 @@ index 75bd3c9df..b1c41bb63 100644
 +  }
 +
 +  function formatPipelineProgress(
-+    phaseHistory?: { phase: string; status: string; detail: string }[],
++    phaseHistory?: { phase: string; status: string; detail: string; duration_ms?: number; output?: unknown }[],
 +    phaseAgentMap?: Record<string, string>,
++    phaseColorMap?: Record<string, string>,
 +  ): string | undefined {
 +    if (!phaseHistory || phaseHistory.length === 0) return undefined
 +    const lines = ["pipeline progress:"]
 +    for (const item of phaseHistory) {
 +      const agent = phaseAgentMap?.[item.phase] ?? "unmapped"
-+      lines.push(`- ${item.phase} [${item.status}] agent=${agent}`)
++      const color = phaseColorMap?.[item.phase]
++      const chip = phaseColorChip(item.phase, color)
++      const phaseDuration = item.duration_ms && item.duration_ms > 0 ? ` duration=${formatMs(item.duration_ms)}` : ""
++      lines.push(`- ${chip} ${item.phase} [${item.status}] agent=${agent}${color ? ` color=${color}` : ""}${phaseDuration}`)
++      if (item.status === "output") {
++        lines.push(`  output: ${formatPipelineOutput(item.output)}`)
++      }
 +    }
 +    return lines.join("\n")
++  }
++
++  function phaseColorChip(phase: string, color?: string): string {
++    const lower = phase.toLowerCase()
++    if (lower === "intent") return "🩷"
++    if (lower === "triage") return "🔴"
++    if (lower === "requirements") return "🟠"
++    if (lower === "versioning") return "🟡"
++    if (lower === "plan") return "🟢"
++    if (lower === "code") return "🟢"
++    if (lower === "test") return "🩵"
++    if (lower === "review") return "🔵"
++    if (lower === "docs") return "🔷"
++    if (lower === "execute") return "🟦"
++    if (lower === "verify") return "🟣"
++    if (lower === "human_checkpoints") return "🟪"
++    if (lower === "gate_pre_merge") return "🌺"
++    if (lower === "finalize") return "💗"
++    if (color?.toUpperCase() === "#FF5FA2") return "🩷"
++    return "⚪"
++  }
++
++  function parsePipelineProgressLine(line: string):
++    | { phase: string; status: string; detail: string; timestamp?: number; duration_ms?: number; agent?: string; color?: string; output?: unknown }
++    | undefined {
++    const prefix = "::pipeline-progress::"
++    if (!line.startsWith(prefix)) return undefined
++    try {
++      const parsed = JSON.parse(line.slice(prefix.length))
++      return {
++        phase: String(parsed.phase ?? "unknown"),
++        status: String(parsed.status ?? "unknown"),
++        detail: String(parsed.detail ?? ""),
++        ...(typeof parsed.timestamp === "number" ? { timestamp: parsed.timestamp } : {}),
++        ...(typeof parsed.duration_ms === "number" ? { duration_ms: parsed.duration_ms } : {}),
++        ...(typeof parsed.agent === "string" ? { agent: parsed.agent } : {}),
++        ...(typeof parsed.color === "string" ? { color: parsed.color } : {}),
++        ...(parsed.output !== undefined ? { output: parsed.output } : {}),
++      }
++    } catch {
++      return undefined
++    }
++  }
++
++  function formatPipelineOutput(output: unknown): string {
++    if (output === undefined) return "undefined"
++    try {
++      const text = JSON.stringify(output)
++      const max = 1200
++      if (!text) return "null"
++      if (text.length <= max) return text
++      return `${text.slice(0, max)}... (truncated)`
++    } catch {
++      return String(output)
++    }
++  }
++
++  function formatMs(ms: number): string {
++    if (ms >= 60_000) return `${(ms / 60_000).toFixed(1)}m`
++    if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`
++    return `${ms}ms`
 +  }
 +
    export async function resolvePromptParts(template: string): Promise<PromptInput["parts"]> {

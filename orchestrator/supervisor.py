@@ -6,7 +6,7 @@ import time
 import uuid
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from contracts.registry import ContractRegistry
 from orchestrator.approvals import ApprovalManager
@@ -127,6 +127,7 @@ class Supervisor:
         audit_logger: Optional[AuditLogger] = None,
         provenance_bundler: Optional[ProvenanceBundler] = None,
         resilience_manager: Optional[ResilienceManager] = None,
+        phase_event_callback: Optional[Callable[[Task, Dict[str, Any]], None]] = None,
     ) -> None:
         self.queue = queue
         self.state_store = state_store
@@ -143,6 +144,7 @@ class Supervisor:
         self.audit_logger = audit_logger
         self.provenance_bundler = provenance_bundler
         self.resilience_manager = resilience_manager
+        self.phase_event_callback = phase_event_callback
         self.phase_order = phase_order or [
             "intent",
             "triage",
@@ -197,9 +199,40 @@ class Supervisor:
         self._emit_audit("task_started", task, {"phase_count": len(self.phase_order)})
 
         start_time = time.time()
+        phase_started_at: Dict[str, float] = {}
         for phase in self.phase_order:
+            phase_started_at[phase] = time.time()
+            self._emit_phase_event(
+                task,
+                {
+                    "phase": phase,
+                    "status": "running",
+                    "detail": f"{phase} started",
+                    "timestamp": time.time(),
+                },
+            )
             result = self._run_phase_with_resilience(task, phase)
             task.phase_history.append(result)
+            self._emit_phase_event(
+                task,
+                {
+                    "phase": result.phase,
+                    "status": result.status,
+                    "detail": result.detail,
+                    "timestamp": result.timestamp,
+                    "duration_ms": int(max(0.0, (result.timestamp - phase_started_at.get(result.phase, result.timestamp)) * 1000)),
+                },
+            )
+            self._emit_phase_event(
+                task,
+                {
+                    "phase": result.phase,
+                    "status": "output",
+                    "detail": f"{result.phase} output",
+                    "timestamp": result.timestamp,
+                    "output": self._build_phase_payload(result.phase, task),
+                },
+            )
             self.state_store.save_task(task)
             self._emit_audit(
                 "phase_result",
@@ -747,6 +780,12 @@ class Supervisor:
         if self.audit_logger is None:
             return
         self.audit_logger.emit(event_type=event_type, task_id=task.task_id, payload=payload)
+
+    def _emit_phase_event(self, task: Task, event: Dict[str, Any]) -> None:
+        callback = self.phase_event_callback
+        if callback is None:
+            return
+        callback(task, event)
 
     def _write_provenance_bundle(self, task: Task, outcome: str) -> None:
         if self.provenance_bundler is None:

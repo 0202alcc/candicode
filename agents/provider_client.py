@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import ssl
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
@@ -69,7 +70,7 @@ class OpenAICompatibleHostedModelClient(HostedModelClient):
             method="POST",
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
+            with urllib.request.urlopen(req, timeout=self.timeout_seconds, context=_build_ssl_context()) as resp:
                 raw = resp.read().decode("utf-8")
                 return json.loads(raw)
         except urllib.error.HTTPError as exc:
@@ -159,3 +160,26 @@ def _strip_markdown_json_fence(text: str) -> str:
     if match:
         return match.group(1).strip()
     return stripped
+
+
+def _build_ssl_context() -> ssl.SSLContext:
+    cafile = _resolve_ca_bundle()
+    if cafile:
+        return ssl.create_default_context(cafile=cafile)
+    return ssl.create_default_context()
+
+
+def _resolve_ca_bundle() -> Optional[str]:
+    for env_key in ("OPENCODE_LLM_CA_BUNDLE", "SSL_CERT_FILE", "REQUESTS_CA_BUNDLE"):
+        value = os.getenv(env_key, "").strip()
+        if value and os.path.isfile(value):
+            return value
+    try:
+        import certifi  # type: ignore
+
+        certifi_path = certifi.where()
+        if certifi_path and os.path.isfile(certifi_path):
+            return certifi_path
+    except Exception:
+        pass
+    return None

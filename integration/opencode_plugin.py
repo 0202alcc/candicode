@@ -5,7 +5,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from agents.backend_adapter_v1 import (
     HostedModelClientAdapterV1,
@@ -29,6 +29,7 @@ class PluginResult:
     provenance_bundle_path: Optional[str]
     phase_history: list[dict]
     phase_agent_map: Dict[str, str]
+    phase_color_map: Dict[str, str]
 
 
 class OpencodePipelinePlugin:
@@ -47,9 +48,33 @@ class OpencodePipelinePlugin:
         self.supervisor = self._build_supervisor(model_client=model_client)
 
     def handle_prompt(
-        self, prompt: str, priority: str = "interactive", dry_run: bool = False
+        self,
+        prompt: str,
+        priority: str = "interactive",
+        dry_run: bool = False,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> PluginResult:
-        task = self.supervisor.run_prompt(prompt=prompt, priority=priority, dry_run=dry_run)
+        phase_agent_map = _phase_agent_map()
+        phase_color_map = _phase_color_map()
+        previous_callback = self.supervisor.phase_event_callback
+        if progress_callback is not None:
+            self.supervisor.phase_event_callback = lambda task, event: progress_callback(
+                {
+                    "task_id": task.task_id,
+                    "phase": str(event.get("phase", "unknown")),
+                    "status": str(event.get("status", "unknown")),
+                    "detail": str(event.get("detail", "")),
+                    "timestamp": event.get("timestamp"),
+                    "duration_ms": event.get("duration_ms"),
+                    "agent": phase_agent_map.get(str(event.get("phase", "")), "unmapped"),
+                    "color": phase_color_map.get(str(event.get("phase", "")), "#94A3B8"),
+                    "output": event.get("output"),
+                }
+            )
+        try:
+            task = self.supervisor.run_prompt(prompt=prompt, priority=priority, dry_run=dry_run)
+        finally:
+            self.supervisor.phase_event_callback = previous_callback
         final = task.phase_history[-1]
         return PluginResult(
             task_id=task.task_id,
@@ -66,7 +91,8 @@ class OpencodePipelinePlugin:
                 }
                 for item in task.phase_history
             ],
-            phase_agent_map=_phase_agent_map(),
+            phase_agent_map=phase_agent_map,
+            phase_color_map=phase_color_map,
         )
 
     def replay(self, provenance_bundle_path: str | Path) -> PluginResult:
@@ -88,6 +114,7 @@ class OpencodePipelinePlugin:
                 for item in task.phase_history
             ],
             phase_agent_map=_phase_agent_map(),
+            phase_color_map=_phase_color_map(),
         )
 
     def _build_supervisor(self, model_client: HostedModelClient) -> Supervisor:
@@ -497,6 +524,25 @@ def _phase_agent_map() -> Dict[str, str]:
         }
     )
     return mapping
+
+
+def _phase_color_map() -> Dict[str, str]:
+    return {
+        "intent": "#FF5FA2",
+        "triage": "#FF3B30",
+        "requirements": "#FF8C00",
+        "versioning": "#FFD60A",
+        "plan": "#A3E635",
+        "code": "#34C759",
+        "test": "#2DD4BF",
+        "review": "#22D3EE",
+        "docs": "#0A84FF",
+        "execute": "#5E5CE6",
+        "verify": "#8B5CF6",
+        "human_checkpoints": "#C026D3",
+        "gate_pre_merge": "#EC4899",
+        "finalize": "#FB7185",
+    }
 
 
 def _is_git_repo(path: Path) -> bool:
