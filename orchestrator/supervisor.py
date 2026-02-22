@@ -164,6 +164,7 @@ class Supervisor:
             "code",
             "test",
             "ci_gate",
+            "security_gate",
             "review",
             "docs",
             "execute",
@@ -423,6 +424,8 @@ class Supervisor:
             return self._run_requirements_gate_phase(task)
         if phase == "ci_gate":
             return self._run_ci_gate_phase(task)
+        if phase == "security_gate":
+            return self._run_security_gate_phase(task)
         if phase == "versioning":
             return self._run_versioning_phase(task)
         if phase == "execute":
@@ -652,6 +655,54 @@ class Supervisor:
             phase="ci_gate",
             status="failed",
             detail=f"ci gate failed checks: {', '.join(result.failures)}",
+            timestamp=time.time(),
+        )
+
+    def _run_security_gate_phase(self, task: Task) -> PhaseResult:
+        payload = task.agent_outputs.get("security", {})
+        if not isinstance(payload, dict):
+            payload = {}
+        critical_findings = payload.get("critical_findings")
+        high_findings = payload.get("high_findings")
+        critical = (
+            [item.strip() for item in critical_findings if isinstance(item, str) and item.strip()]
+            if isinstance(critical_findings, list)
+            else []
+        )
+        high = (
+            [item.strip() for item in high_findings if isinstance(item, str) and item.strip()]
+            if isinstance(high_findings, list)
+            else []
+        )
+        waiver_raw = payload.get("waiver_candidates")
+        waiver_candidates = (
+            [item.strip() for item in waiver_raw if isinstance(item, str) and item.strip()]
+            if isinstance(waiver_raw, list)
+            else []
+        )
+        passed = not critical and not high
+        task.agent_outputs["security_gate"] = {
+            "pass": passed,
+            "critical_findings": critical,
+            "high_findings": high,
+            "waiver_candidates": waiver_candidates,
+        }
+        if not passed:
+            summary = []
+            if critical:
+                summary.append(f"critical={len(critical)}")
+            if high:
+                summary.append(f"high={len(high)}")
+            return PhaseResult(
+                phase="security_gate",
+                status="failed",
+                detail=f"security gate failed ({', '.join(summary)})",
+                timestamp=time.time(),
+            )
+        return PhaseResult(
+            phase="security_gate",
+            status="success",
+            detail="security gate passed",
             timestamp=time.time(),
         )
 
@@ -1003,6 +1054,13 @@ class Supervisor:
                 "checks": [],
                 "failed_checks": [],
                 "flaky_quarantined": [],
+            }
+        if phase == "security_gate":
+            return {
+                "pass": True,
+                "critical_findings": [],
+                "high_findings": [],
+                "waiver_candidates": [],
             }
         if phase == "review":
             return {
