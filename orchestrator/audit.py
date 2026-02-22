@@ -122,11 +122,18 @@ class ProvenanceBundler:
         self.bundle_dir = Path(bundle_dir)
         self.bundle_dir.mkdir(parents=True, exist_ok=True)
 
-    def write_bundle(self, task_id: str, task_payload: Dict, outcome: str) -> Path:
+    def write_bundle(
+        self,
+        task_id: str,
+        task_payload: Dict,
+        outcome: str,
+        metadata: Optional[Dict] = None,
+    ) -> Path:
         material = {
             "task_id": task_id,
             "outcome": outcome,
             "task": task_payload,
+            "metadata": metadata or {},
         }
         canonical = json.dumps(material, sort_keys=True, separators=(",", ":"))
         digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()

@@ -1,3 +1,4 @@
+import json
 import tempfile
 import time
 import unittest
@@ -60,6 +61,9 @@ class SupervisorTests(unittest.TestCase):
             assert saved is not None
             self.assertEqual("queued", saved["status"])
             self.assertEqual("hello world", saved["prompt"])
+            self.assertEqual(1, saved["state_revision"])
+            snapshots = store.list_snapshots(task.task_id)
+            self.assertEqual(1, len(snapshots))
 
     def test_process_next_runs_all_phases_until_completed(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -1052,6 +1056,44 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual(len(original.phase_history), len(replayed.phase_history))
             self.assertEqual("task_replayed", logger.read_events()[-1]["event_type"])
 
+    def test_replay_from_bundle_marks_invalid_when_phase_unknown(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            store = StateStore(tmp_path / "state.json")
+            logger = AuditLogger(tmp_path / "audit.jsonl")
+            bundler = ProvenanceBundler(tmp_path / "bundles")
+            supervisor = Supervisor(
+                queue=TaskQueue(),
+                state_store=store,
+                audit_logger=logger,
+                provenance_bundler=bundler,
+            )
+
+            bundle_path = bundler.write_bundle(
+                "t-invalid",
+                {
+                    "task_id": "t-invalid",
+                    "prompt": "x",
+                    "priority": "interactive",
+                    "created_at": 1.0,
+                    "phase_history": [
+                        {
+                            "phase": "mystery_phase",
+                            "status": "success",
+                            "detail": "legacy",
+                            "timestamp": 1.0,
+                        }
+                    ],
+                },
+                "completed",
+            )
+
+            replayed = supervisor.replay_from_bundle(bundle_path)
+            self.assertEqual("replay_invalidated", replayed.status)
+            self.assertTrue(replayed.invalidated)
+            assert replayed.invalidation_reason is not None
+            self.assertIn("unknown phase", replayed.invalidation_reason)
+
     def test_audit_and_provenance_written_for_blocked_task(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
@@ -1084,6 +1126,24 @@ class SupervisorTests(unittest.TestCase):
             self.assertTrue(Path(task.provenance_bundle_path).exists())
             self.assertTrue(logger.verify_chain())
             self.assertIn("task_blocked", [e["event_type"] for e in logger.read_events()])
+
+    def test_provenance_bundle_includes_metadata_and_pr_context(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            store = StateStore(tmp_path / "state.json")
+            bundler = ProvenanceBundler(tmp_path / "bundles")
+            supervisor = Supervisor(
+                queue=TaskQueue(),
+                state_store=store,
+                provenance_bundler=bundler,
+            )
+            task = supervisor.run_prompt("implement parser hardening")
+            assert task.provenance_bundle_path is not None
+            bundle = json.loads(Path(task.provenance_bundle_path).read_text(encoding="utf-8"))
+            metadata = bundle["material"]["metadata"]
+            self.assertIn("pipeline_phase_order", metadata)
+            self.assertIn("pr_metadata", metadata)
+            self.assertEqual("main", metadata["base_branch"])
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import heapq
 import json
 import re
@@ -56,6 +57,9 @@ class Task:
     budget_tool_limit: Optional[int] = None
     budget_time_limit_seconds: Optional[float] = None
     budget_envelope_id: Optional[str] = None
+    state_revision: int = 0
+    invalidated: bool = False
+    invalidation_reason: Optional[str] = None
     status: str = "queued"
     phase_history: List[PhaseResult] = field(default_factory=list)
 
@@ -82,6 +86,7 @@ class TaskQueue:
 class StateStore:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
+        self.snapshot_dir = self.path.parent / "snapshots"
 
     def load(self) -> Dict[str, Dict]:
         if not self.path.exists():
@@ -100,8 +105,13 @@ class StateStore:
 
     def save_task(self, task: Task) -> None:
         data = self.load()
-        data["tasks"][task.task_id] = self._serialize_task(task)
+        previous = data["tasks"].get(task.task_id)
+        previous_revision = int(previous.get("state_revision", 0)) if isinstance(previous, dict) else 0
+        task.state_revision = previous_revision + 1
+        payload = self._serialize_task(task)
+        data["tasks"][task.task_id] = payload
         self.save(data)
+        self._write_snapshot(task.task_id, payload, task.state_revision)
 
     def load_task(self, task_id: str) -> Optional[Dict]:
         data = self.load()
@@ -112,6 +122,18 @@ class StateStore:
         payload = asdict(task)
         payload["phase_history"] = [asdict(item) for item in task.phase_history]
         return payload
+
+    def list_snapshots(self, task_id: str) -> List[Path]:
+        root = self.snapshot_dir / task_id
+        if not root.exists():
+            return []
+        return sorted([path for path in root.glob("r*.json") if path.is_file()])
+
+    def _write_snapshot(self, task_id: str, payload: Dict, revision: int) -> None:
+        root = self.snapshot_dir / task_id
+        root.mkdir(parents=True, exist_ok=True)
+        target = root / f"r{revision:04d}.json"
+        target.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 class Supervisor:
@@ -314,6 +336,7 @@ class Supervisor:
         path = Path(bundle_path)
         raw = json.loads(path.read_text(encoding="utf-8"))
         material = raw.get("material", {})
+        replay_issues = self._replay_invalidation_reasons(raw)
         task_payload = material.get("task", {})
         phase_history = [
             PhaseResult(
@@ -345,14 +368,22 @@ class Supervisor:
             budget_tool_limit=task_payload.get("budget_tool_limit"),
             budget_time_limit_seconds=task_payload.get("budget_time_limit_seconds"),
             budget_envelope_id=task_payload.get("budget_envelope_id"),
-            status="replayed",
+            state_revision=task_payload.get("state_revision", 0),
+            invalidated=bool(replay_issues),
+            invalidation_reason="; ".join(replay_issues) if replay_issues else None,
+            status="replay_invalidated" if replay_issues else "replayed",
             phase_history=phase_history,
         )
         self.state_store.save_task(task)
         self._emit_audit(
             "task_replayed",
             task,
-            {"source": str(path), "phase_count": len(task.phase_history)},
+            {
+                "source": str(path),
+                "phase_count": len(task.phase_history),
+                "invalidated": bool(replay_issues),
+                "issues": replay_issues,
+            },
         )
         return task
 
@@ -1278,8 +1309,25 @@ class Supervisor:
             task_id=task.task_id,
             task_payload=asdict(task),
             outcome=outcome,
+            metadata=self._build_provenance_metadata(task=task, outcome=outcome),
         )
         task.provenance_bundle_path = str(path)
+
+    def _build_provenance_metadata(self, task: Task, outcome: str) -> Dict:
+        pr_title = f"codex: {task.prompt.strip()[:72]}" if task.prompt.strip() else f"codex task {task.task_id}"
+        return {
+            "pipeline_phase_order": self.phase_order,
+            "base_branch": self.base_branch,
+            "work_branch": task.work_branch,
+            "task_state_revision": task.state_revision,
+            "outcome": outcome,
+            "pr_metadata": {
+                "branch": task.work_branch,
+                "base_branch": self.base_branch,
+                "title": pr_title,
+                "provenance_bundle": task.provenance_bundle_path,
+            },
+        }
 
     def _check_budget(self, task: Task, start_time: float) -> List[str]:
         elapsed = time.time() - start_time
@@ -1307,6 +1355,40 @@ class Supervisor:
             seen.add(failure)
             unique.append(failure)
         return unique
+
+    def _replay_invalidation_reasons(self, bundle: Dict[str, Any]) -> List[str]:
+        issues: List[str] = []
+        material = bundle.get("material")
+        if not isinstance(material, dict):
+            issues.append("bundle missing material object")
+            return issues
+        digest = bundle.get("digest")
+        if not isinstance(digest, str) or not digest.strip():
+            issues.append("bundle missing digest")
+        else:
+            canonical = json.dumps(material, sort_keys=True, separators=(",", ":"))
+            expected = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+            if expected != digest:
+                issues.append("bundle digest mismatch")
+        task_payload = material.get("task")
+        if not isinstance(task_payload, dict):
+            issues.append("bundle missing task payload")
+            return issues
+        history = task_payload.get("phase_history")
+        if not isinstance(history, list):
+            issues.append("bundle phase_history is not a list")
+            return issues
+        allowed = set(self.phase_order) | {"budget"}
+        unknown: List[str] = []
+        for item in history:
+            if not isinstance(item, dict):
+                continue
+            phase = item.get("phase")
+            if isinstance(phase, str) and phase not in allowed and phase not in unknown:
+                unknown.append(phase)
+        if unknown:
+            issues.append(f"bundle contains unknown phase(s): {', '.join(sorted(unknown))}")
+        return issues
 
     @staticmethod
     def _estimate_task_tokens(task: Task) -> int:
