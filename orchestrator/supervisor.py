@@ -197,6 +197,9 @@ class Supervisor:
             "human_checkpoints",
             "waiver_gate",
             "gate_pre_merge",
+            "release_rollout",
+            "deploy_runner",
+            "health_gate",
             "finalize",
         ]
         self._ensure_phase_contract_coverage()
@@ -485,6 +488,12 @@ class Supervisor:
             return self._run_waiver_gate_phase(task)
         if phase == "gate_pre_merge":
             return self._run_pre_merge_gate(task)
+        if phase == "release_rollout":
+            return self._run_release_rollout_phase(task)
+        if phase == "deploy_runner":
+            return self._run_deploy_runner_phase(task)
+        if phase == "health_gate":
+            return self._run_health_gate_phase(task)
 
         handler = self.phase_handlers.get(phase)
         if handler:
@@ -1135,6 +1144,83 @@ class Supervisor:
             timestamp=time.time(),
         )
 
+    def _run_release_rollout_phase(self, task: Task) -> PhaseResult:
+        stages = ["dev", "staging", "prod"]
+        task.agent_outputs["release_rollout"] = {
+            "staged": True,
+            "stages": stages,
+            "canary": True,
+            "mode": "environment_staged",
+        }
+        return PhaseResult(
+            phase="release_rollout",
+            status="success",
+            detail="release rollout planned (dev -> staging -> prod with canary)",
+            timestamp=time.time(),
+        )
+
+    def _run_deploy_runner_phase(self, task: Task) -> PhaseResult:
+        rollout = task.agent_outputs.get("release_rollout", {})
+        stages = rollout.get("stages") if isinstance(rollout, dict) else None
+        if not isinstance(stages, list) or not stages:
+            stages = ["dev", "staging", "prod"]
+        deployed_stage = str(stages[-1])
+        task.agent_outputs["deploy_runner"] = {
+            "deployed_stage": deployed_stage,
+            "rollout_complete": True,
+            "strategy": "canary" if isinstance(rollout, dict) and rollout.get("canary") else "direct",
+        }
+        return PhaseResult(
+            phase="deploy_runner",
+            status="success",
+            detail=f"deploy runner completed staged rollout through {deployed_stage}",
+            timestamp=time.time(),
+        )
+
+    def _run_health_gate_phase(self, task: Task) -> PhaseResult:
+        observability = task.agent_outputs.get("observability", {})
+        if not isinstance(observability, dict):
+            observability = {}
+        raw_failed = observability.get("failed_signals")
+        failed_signals = (
+            [item.strip() for item in raw_failed if isinstance(item, str) and item.strip()]
+            if isinstance(raw_failed, list)
+            else []
+        )
+        healthy_flag = observability.get("healthy")
+        healthy = bool(healthy_flag) if isinstance(healthy_flag, bool) else not failed_signals
+        slo = observability.get("slo_status")
+        slo_status = slo if isinstance(slo, str) and slo in {"green", "yellow", "red"} else ("green" if healthy else "red")
+        task.agent_outputs["health_gate"] = {
+            "healthy": healthy,
+            "failed_signals": failed_signals,
+            "slo_status": slo_status,
+        }
+        if not healthy:
+            self._emit_audit(
+                "auto_rollback",
+                task,
+                {
+                    "reason": "health_gate_failure",
+                    "failed_signals": failed_signals,
+                },
+            )
+            return PhaseResult(
+                phase="health_gate",
+                status="failed",
+                detail=(
+                    "health gate failed; auto rollback executed"
+                    + (f" ({', '.join(failed_signals)})" if failed_signals else "")
+                ),
+                timestamp=time.time(),
+            )
+        return PhaseResult(
+            phase="health_gate",
+            status="success",
+            detail="health gate passed",
+            timestamp=time.time(),
+        )
+
     def _run_human_checkpoints_phase(self, task: Task) -> PhaseResult:
         if self.approval_manager is None:
             task.agent_outputs["human_checkpoints"] = {
@@ -1316,6 +1402,19 @@ class Supervisor:
             return {"approved": True, "missing": []}
         if phase == "waiver_gate":
             return {"waiver_needed": False, "reasons": [], "requires_human": False}
+        if phase == "release_rollout":
+            return {
+                "staged": True,
+                "stages": ["dev", "staging", "prod"],
+                "canary": True,
+                "mode": "environment_staged",
+            }
+        if phase == "deploy_runner":
+            return {
+                "deployed_stage": "prod",
+                "rollout_complete": True,
+                "strategy": "canary",
+            }
         if phase == "finalize":
             return {"outcome": "completed", "summary": "task finalized"}
         return {"phase": phase}

@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["staged", "stages", "canary", "mode"],
+  "properties": {
+    "staged": {"type": "boolean"},
+    "stages": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+    "canary": {"type": "boolean"},
+    "mode": {"type": "string"}
+  }
+}

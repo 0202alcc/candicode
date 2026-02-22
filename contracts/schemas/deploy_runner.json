@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["deployed_stage", "rollout_complete", "strategy"],
+  "properties": {
+    "deployed_stage": {"type": "string"},
+    "rollout_complete": {"type": "boolean"},
+    "strategy": {"type": "string", "enum": ["canary", "direct"]}
+  }
+}

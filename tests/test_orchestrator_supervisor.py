@@ -77,16 +77,19 @@ class SupervisorTests(unittest.TestCase):
 
             assert task is not None
             self.assertEqual("completed", task.status)
-            self.assertEqual(23, len(task.phase_history))
+            self.assertEqual(26, len(task.phase_history))
             self.assertEqual("ingress_guard", task.phase_history[0].phase)
             self.assertEqual("budget_envelope", task.phase_history[1].phase)
             self.assertEqual("intent", task.phase_history[2].phase)
             self.assertEqual("router_gate", task.phase_history[4].phase)
             self.assertEqual("requirements_gate", task.phase_history[6].phase)
             self.assertEqual("finalize", task.phase_history[-1].phase)
-            self.assertEqual("gate_pre_merge", task.phase_history[-2].phase)
-            self.assertEqual("waiver_gate", task.phase_history[-3].phase)
-            self.assertEqual("human_checkpoints", task.phase_history[-4].phase)
+            self.assertEqual("health_gate", task.phase_history[-2].phase)
+            self.assertEqual("deploy_runner", task.phase_history[-3].phase)
+            self.assertEqual("release_rollout", task.phase_history[-4].phase)
+            self.assertEqual("gate_pre_merge", task.phase_history[-5].phase)
+            self.assertEqual("waiver_gate", task.phase_history[-6].phase)
+            self.assertEqual("human_checkpoints", task.phase_history[-7].phase)
             self.assertEqual("versioning", task.phase_history[7].phase)
             self.assertEqual("code", task.phase_history[9].phase)
             self.assertEqual("security_gate", task.phase_history[12].phase)
@@ -492,6 +495,9 @@ class SupervisorTests(unittest.TestCase):
                 "human_checkpoints",
                 "waiver_gate",
                 "gate_pre_merge",
+                "release_rollout",
+                "deploy_runner",
+                "health_gate",
                 "finalize",
             ]:
                 self.assertIn(phase, task.handoff_artifacts)
@@ -1201,6 +1207,40 @@ class SupervisorTests(unittest.TestCase):
             self.assertIn("pipeline_phase_order", metadata)
             self.assertIn("pr_metadata", metadata)
             self.assertEqual("main", metadata["base_branch"])
+
+    def test_health_gate_triggers_auto_rollback_on_failed_signals(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = Path(tmp)
+            store = StateStore(tmp_path / "state.json")
+            logger = AuditLogger(tmp_path / "audit.jsonl")
+
+            def inject_bad_observability(task: Task) -> PhaseResult:
+                task.agent_outputs["observability"] = {
+                    "healthy": False,
+                    "failed_signals": ["error_rate", "p95_latency"],
+                    "slo_status": "red",
+                }
+                return PhaseResult(
+                    phase="review",
+                    status="success",
+                    detail="observability seeded",
+                    timestamp=time.time(),
+                )
+
+            supervisor = Supervisor(
+                queue=TaskQueue(),
+                state_store=store,
+                audit_logger=logger,
+                phase_handlers={"review": inject_bad_observability},
+            )
+            supervisor.create_task("health rollback")
+            task = supervisor.process_next()
+
+            assert task is not None
+            self.assertEqual("blocked", task.status)
+            self.assertEqual("health_gate", task.phase_history[-1].phase)
+            self.assertIn("auto rollback executed", task.phase_history[-1].detail)
+            self.assertIn("auto_rollback", [e["event_type"] for e in logger.read_events()])
 
 
 if __name__ == "__main__":
