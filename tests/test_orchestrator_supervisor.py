@@ -10,6 +10,7 @@ from contracts.registry import ContractRegistry
 from orchestrator.approvals import (
     CHECKPOINT_MERGE,
     CHECKPOINT_REQUIREMENTS,
+    CHECKPOINT_WAIVER,
     ApprovalManager,
     ApprovalRecord,
 )
@@ -76,7 +77,7 @@ class SupervisorTests(unittest.TestCase):
 
             assert task is not None
             self.assertEqual("completed", task.status)
-            self.assertEqual(22, len(task.phase_history))
+            self.assertEqual(23, len(task.phase_history))
             self.assertEqual("ingress_guard", task.phase_history[0].phase)
             self.assertEqual("budget_envelope", task.phase_history[1].phase)
             self.assertEqual("intent", task.phase_history[2].phase)
@@ -84,7 +85,8 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual("requirements_gate", task.phase_history[6].phase)
             self.assertEqual("finalize", task.phase_history[-1].phase)
             self.assertEqual("gate_pre_merge", task.phase_history[-2].phase)
-            self.assertEqual("human_checkpoints", task.phase_history[-3].phase)
+            self.assertEqual("waiver_gate", task.phase_history[-3].phase)
+            self.assertEqual("human_checkpoints", task.phase_history[-4].phase)
             self.assertEqual("versioning", task.phase_history[7].phase)
             self.assertEqual("code", task.phase_history[9].phase)
             self.assertEqual("security_gate", task.phase_history[12].phase)
@@ -257,7 +259,7 @@ class SupervisorTests(unittest.TestCase):
             execute_phase = [p for p in task.phase_history if p.phase == "execute"][0]
             self.assertIn("applied 1 file edit", execute_phase.detail)
 
-    def test_pre_merge_gate_blocks_when_policy_context_fails(self) -> None:
+    def test_waiver_gate_blocks_when_policy_context_fails_without_waiver(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = StateStore(Path(tmp) / "state.json")
 
@@ -290,9 +292,63 @@ class SupervisorTests(unittest.TestCase):
 
             assert task is not None
             self.assertEqual("blocked", task.status)
-            self.assertEqual("gate_pre_merge", task.phase_history[-1].phase)
+            self.assertEqual("waiver_gate", task.phase_history[-1].phase)
             self.assertEqual("failed", task.phase_history[-1].status)
-            self.assertIn("security", task.phase_history[-1].detail)
+            self.assertIn("waiver required", task.phase_history[-1].detail)
+
+    def test_waiver_gate_allows_pre_merge_with_valid_waiver(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = StateStore(Path(tmp) / "state.json")
+
+            def failing_ctx(_: Task) -> PolicyContext:
+                return PolicyContext(
+                    requirements_clear=True,
+                    architecture_required=False,
+                    architecture_approved=True,
+                    ci_full_passed=True,
+                    security_passed=False,
+                    qa_passed=True,
+                    perf_passed=True,
+                    review_passed=True,
+                    docs_passed=True,
+                    human_merge_approval=True,
+                    branch_up_to_date=True,
+                    post_deploy_smoke_passed=True,
+                    slo_healthy=True,
+                    alerts_healthy=True,
+                )
+
+            approvals = ApprovalManager(required_checkpoints={CHECKPOINT_WAIVER})
+            approvals.submit(
+                ApprovalRecord(
+                    checkpoint=CHECKPOINT_WAIVER,
+                    approved_by="sec-lead",
+                    approved_at=1.0,
+                    rationale="temporary exception with mitigation",
+                    criteria_ack=["risk accepted", "follow-up ticket created"],
+                    risk_ack=True,
+                    metadata={
+                        "policy_id": "security",
+                        "owner": "sec-team",
+                        "expiry": "2099-01-01T00:00:00+00:00",
+                    },
+                )
+            )
+
+            supervisor = Supervisor(
+                queue=TaskQueue(),
+                state_store=store,
+                policy_context_resolver=failing_ctx,
+                approval_manager=approvals,
+            )
+            supervisor.create_task("security waiver regression")
+            task = supervisor.process_next()
+
+            assert task is not None
+            self.assertEqual("completed", task.status)
+            waiver = task.agent_outputs["waiver_gate"]
+            self.assertTrue(waiver["waiver_needed"])
+            self.assertFalse(waiver["requires_human"])
 
     def test_execute_is_blocked_on_protected_branch(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -434,6 +490,7 @@ class SupervisorTests(unittest.TestCase):
                 "execute",
                 "verify",
                 "human_checkpoints",
+                "waiver_gate",
                 "gate_pre_merge",
                 "finalize",
             ]:

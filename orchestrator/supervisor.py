@@ -6,12 +6,13 @@ import json
 import re
 import time
 import uuid
+from datetime import datetime, timezone
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from contracts.registry import ContractRegistry
-from orchestrator.approvals import ApprovalManager
+from orchestrator.approvals import ApprovalManager, CHECKPOINT_WAIVER
 from orchestrator.audit import AuditLogger, ProvenanceBundler
 from orchestrator.resilience import ResilienceManager
 from policy.engine import PolicyContext, evaluate_pre_merge
@@ -194,6 +195,7 @@ class Supervisor:
             "execute",
             "verify",
             "human_checkpoints",
+            "waiver_gate",
             "gate_pre_merge",
             "finalize",
         ]
@@ -479,6 +481,8 @@ class Supervisor:
             return self._run_verify_phase(task)
         if phase == "human_checkpoints":
             return self._run_human_checkpoints_phase(task)
+        if phase == "waiver_gate":
+            return self._run_waiver_gate_phase(task)
         if phase == "gate_pre_merge":
             return self._run_pre_merge_gate(task)
 
@@ -1047,10 +1051,87 @@ class Supervisor:
                 detail="pre-merge gate passed",
                 timestamp=time.time(),
             )
+        waiver = task.agent_outputs.get("waiver_gate", {})
+        if isinstance(waiver, dict):
+            waiver_needed = bool(waiver.get("waiver_needed", False))
+            requires_human = bool(waiver.get("requires_human", True))
+            if waiver_needed and not requires_human:
+                return PhaseResult(
+                    phase="gate_pre_merge",
+                    status="success",
+                    detail=f"pre-merge gate waived: {', '.join(result.failures)}",
+                    timestamp=time.time(),
+                )
         return PhaseResult(
             phase="gate_pre_merge",
             status="failed",
             detail=f"pre-merge gate failed: {', '.join(result.failures)}",
+            timestamp=time.time(),
+        )
+
+    def _run_waiver_gate_phase(self, task: Task) -> PhaseResult:
+        ctx = self.policy_context_resolver(task)
+        result = evaluate_pre_merge(ctx)
+        waiver_needed = not result.allowed
+        reasons = list(result.failures) if not result.allowed else []
+        requires_human = False
+
+        if waiver_needed:
+            record = None
+            if self.approval_manager is not None and self.approval_manager.is_approved(CHECKPOINT_WAIVER):
+                record = self.approval_manager.records.get(CHECKPOINT_WAIVER)
+            if record is None:
+                requires_human = True
+            elif self._waiver_expired(record.metadata.get("expiry")):
+                requires_human = True
+                reasons.append("waiver_expired")
+            else:
+                self._emit_audit(
+                    "waiver_logged",
+                    task,
+                    {
+                        "policy_failures": result.failures,
+                        "approved_by": record.approved_by,
+                        "reason": record.rationale,
+                        "owner": record.metadata.get("owner"),
+                        "expiry": record.metadata.get("expiry"),
+                        "policy_id": record.metadata.get("policy_id"),
+                    },
+                )
+                follow_up_id = f"waiver-follow-up-{task.task_id}"
+                self._emit_audit(
+                    "waiver_follow_up_task",
+                    task,
+                    {
+                        "task_id": follow_up_id,
+                        "owner": record.metadata.get("owner"),
+                        "expiry": record.metadata.get("expiry"),
+                    },
+                )
+
+        task.agent_outputs["waiver_gate"] = {
+            "waiver_needed": waiver_needed,
+            "reasons": reasons,
+            "requires_human": requires_human,
+        }
+        if waiver_needed and requires_human:
+            return PhaseResult(
+                phase="waiver_gate",
+                status="failed",
+                detail=f"waiver required before merge: {', '.join(reasons)}",
+                timestamp=time.time(),
+            )
+        if waiver_needed:
+            return PhaseResult(
+                phase="waiver_gate",
+                status="success",
+                detail="waiver approved and logged",
+                timestamp=time.time(),
+            )
+        return PhaseResult(
+            phase="waiver_gate",
+            status="success",
+            detail="waiver not required",
             timestamp=time.time(),
         )
 
@@ -1233,6 +1314,8 @@ class Supervisor:
             return {"allowed": True, "failures": []}
         if phase == "human_checkpoints":
             return {"approved": True, "missing": []}
+        if phase == "waiver_gate":
+            return {"waiver_needed": False, "reasons": [], "requires_human": False}
         if phase == "finalize":
             return {"outcome": "completed", "summary": "task finalized"}
         return {"phase": phase}
@@ -1399,6 +1482,28 @@ class Supervisor:
             except Exception:
                 total_chars += len(str(payload))
         return max(1, total_chars // 4)
+
+    @staticmethod
+    def _waiver_expired(expiry: object) -> bool:
+        if expiry is None:
+            return True
+        now = datetime.now(timezone.utc)
+        if isinstance(expiry, (int, float)):
+            return datetime.fromtimestamp(float(expiry), tz=timezone.utc) <= now
+        if isinstance(expiry, str):
+            text = expiry.strip()
+            if not text:
+                return True
+            try:
+                if text.endswith("Z"):
+                    text = text[:-1] + "+00:00"
+                dt = datetime.fromisoformat(text)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt <= now
+            except Exception:
+                return True
+        return True
 
     @staticmethod
     def _coerce_confidence_score(payload: Dict) -> float:
