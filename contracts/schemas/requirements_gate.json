@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["clear", "missing_items", "next_action"],
+  "properties": {
+    "clear": {"type": "boolean"},
+    "missing_items": {"type": "array", "items": {"type": "string"}},
+    "next_action": {"type": "string", "enum": ["proceed", "request_clarification"]},
+    "failures": {"type": "array", "items": {"type": "string"}}
+  }
+}

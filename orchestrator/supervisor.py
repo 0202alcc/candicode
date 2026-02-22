@@ -161,6 +161,17 @@ class Supervisor:
             "gate_pre_merge",
             "finalize",
         ]
+        self._ensure_phase_contract_coverage()
+
+    def _ensure_phase_contract_coverage(self) -> None:
+        if self.contract_registry is None:
+            return
+        missing = self.contract_registry.missing_schemas(self.phase_order)
+        if missing:
+            raise ValueError(
+                "missing handoff schema(s) for configured phase_order: "
+                + ", ".join(missing)
+            )
 
     def create_task(
         self,

@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["healthy", "issues"],
+  "properties": {
+    "healthy": {"type": "boolean"},
+    "issues": {"type": "array", "items": {"type": "string"}},
+    "safe_mode_required": {"type": "boolean"}
+  }
+}

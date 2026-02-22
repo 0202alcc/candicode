@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pass", "rto_seconds", "rpo_seconds"],
+  "properties": {
+    "pass": {"type": "boolean"},
+    "rto_seconds": {"type": "integer", "minimum": 0},
+    "rpo_seconds": {"type": "integer", "minimum": 0},
+    "failures": {"type": "array", "items": {"type": "string"}}
+  }
+}

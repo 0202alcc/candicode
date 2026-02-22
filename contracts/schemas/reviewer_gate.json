@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pass", "required_fixes", "max_severity"],
+  "properties": {
+    "pass": {"type": "boolean"},
+    "required_fixes": {"type": "array", "items": {"type": "string"}},
+    "max_severity": {"type": "string", "enum": ["none", "low", "medium", "high", "critical"]}
+  }
+}

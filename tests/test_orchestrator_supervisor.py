@@ -363,6 +363,19 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual("failed", task.phase_history[-1].status)
             self.assertIn("handoff schema validation failed", task.phase_history[-1].detail)
 
+    def test_supervisor_init_fails_when_phase_order_missing_schema(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = StateStore(Path(tmp) / "state.json")
+            schema_dir = Path(__file__).resolve().parents[1] / "contracts" / "schemas"
+            registry = ContractRegistry.from_directory(schema_dir)
+            with self.assertRaisesRegex(ValueError, "missing handoff schema"):
+                Supervisor(
+                    queue=TaskQueue(),
+                    state_store=store,
+                    contract_registry=registry,
+                    phase_order=["intent", "not_real_phase"],
+                )
+
     def test_contract_validation_succeeds_and_records_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = StateStore(Path(tmp) / "state.json")

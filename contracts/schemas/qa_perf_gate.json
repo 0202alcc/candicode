@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pass", "qa_matrix", "budget_violations"],
+  "properties": {
+    "pass": {"type": "boolean"},
+    "qa_matrix": {
+      "type": "object",
+      "additionalProperties": {"type": "string", "enum": ["pass", "fail", "skip"]}
+    },
+    "budget_violations": {"type": "array", "items": {"type": "string"}}
+  }
+}

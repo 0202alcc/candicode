@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pass", "checks", "failed_checks"],
+  "properties": {
+    "pass": {"type": "boolean"},
+    "checks": {"type": "array", "items": {"type": "string"}},
+    "failed_checks": {"type": "array", "items": {"type": "string"}},
+    "flaky_quarantined": {"type": "array", "items": {"type": "string"}}
+  }
+}

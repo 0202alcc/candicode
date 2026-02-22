@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["token_budget", "tool_budget", "time_budget_seconds", "budget_id"],
+  "properties": {
+    "token_budget": {"type": "integer", "minimum": 1},
+    "tool_budget": {"type": "integer", "minimum": 1},
+    "time_budget_seconds": {"type": "number", "exclusiveMinimum": 0},
+    "budget_id": {"type": "string"},
+    "policy": {"type": "string"}
+  }
+}

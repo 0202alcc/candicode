@@ -41,3 +41,10 @@ class ContractRegistry:
 
         errors = [f"{err.path}: {err.message}" for err in result.errors]
         return HandoffValidation(valid=False, errors=errors)
+
+    def missing_schemas(self, phases: List[str]) -> List[str]:
+        missing: List[str] = []
+        for phase in phases:
+            if phase not in self.schemas:
+                missing.append(phase)
+        return missing

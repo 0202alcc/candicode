@@ -1,0 +1,15 @@
+[
+  "ingress_guard",
+  "budget_envelope",
+  "router_gate",
+  "requirements_gate",
+  "ci_gate",
+  "security_gate",
+  "qa_perf_gate",
+  "reviewer_gate",
+  "waiver_gate",
+  "health_gate",
+  "platform_health_gate",
+  "dr_gate",
+  "access_gate"
+]

@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["compliant", "violations"],
+  "properties": {
+    "compliant": {"type": "boolean"},
+    "violations": {"type": "array", "items": {"type": "string"}},
+    "recertified_principals": {"type": "array", "items": {"type": "string"}}
+  }
+}

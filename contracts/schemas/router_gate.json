@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["allowed", "confidence", "threshold", "route"],
+  "properties": {
+    "allowed": {"type": "boolean"},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "threshold": {"type": "number", "minimum": 0, "maximum": 1},
+    "route": {"type": "string", "enum": ["normal", "deeper_pipeline", "human_triage"]},
+    "failures": {"type": "array", "items": {"type": "string"}}
+  }
+}

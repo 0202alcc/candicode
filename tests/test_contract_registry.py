@@ -1,4 +1,5 @@
 import unittest
+import json
 from pathlib import Path
 
 from contracts.registry import ContractRegistry
@@ -37,6 +38,19 @@ class ContractRegistryTests(unittest.TestCase):
         result = registry.validate("nonexistent_phase", {})
         self.assertFalse(result.valid)
         self.assertIn("missing handoff schema", result.errors[0])
+
+    def test_missing_schemas_reports_missing_phase_names(self) -> None:
+        registry = ContractRegistry.from_directory(SCHEMAS)
+        missing = registry.missing_schemas(["intent", "triage", "not_real_phase"])
+        self.assertEqual(["not_real_phase"], missing)
+
+    def test_planned_phase_order_has_contract_coverage(self) -> None:
+        registry = ContractRegistry.from_directory(SCHEMAS)
+        planned_path = ROOT / "config" / "planned_phase_order.json"
+        planned_order = json.loads(planned_path.read_text(encoding="utf-8"))
+        self.assertIsInstance(planned_order, list)
+        missing = registry.missing_schemas(planned_order)
+        self.assertEqual([], missing)
 
 
 if __name__ == "__main__":

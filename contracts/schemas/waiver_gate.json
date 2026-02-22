@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["waiver_needed", "reasons", "requires_human"],
+  "properties": {
+    "waiver_needed": {"type": "boolean"},
+    "reasons": {"type": "array", "items": {"type": "string"}},
+    "requires_human": {"type": "boolean"}
+  }
+}

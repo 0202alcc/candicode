@@ -1,0 +1,10 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["healthy", "failed_signals"],
+  "properties": {
+    "healthy": {"type": "boolean"},
+    "failed_signals": {"type": "array", "items": {"type": "string"}},
+    "slo_status": {"type": "string", "enum": ["green", "yellow", "red"]}
+  }
+}

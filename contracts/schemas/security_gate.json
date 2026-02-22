@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["pass", "critical_findings", "high_findings"],
+  "properties": {
+    "pass": {"type": "boolean"},
+    "critical_findings": {"type": "array", "items": {"type": "string"}},
+    "high_findings": {"type": "array", "items": {"type": "string"}},
+    "waiver_candidates": {"type": "array", "items": {"type": "string"}}
+  }
+}
