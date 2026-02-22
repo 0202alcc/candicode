@@ -167,6 +167,7 @@ class Supervisor:
             "security_gate",
             "qa_perf_gate",
             "review",
+            "reviewer_gate",
             "docs",
             "execute",
             "verify",
@@ -429,6 +430,8 @@ class Supervisor:
             return self._run_security_gate_phase(task)
         if phase == "qa_perf_gate":
             return self._run_qa_perf_gate_phase(task)
+        if phase == "reviewer_gate":
+            return self._run_reviewer_gate_phase(task)
         if phase == "versioning":
             return self._run_versioning_phase(task)
         if phase == "execute":
@@ -750,6 +753,57 @@ class Supervisor:
             phase="qa_perf_gate",
             status="success",
             detail="qa/perf gate passed",
+            timestamp=time.time(),
+        )
+
+    def _run_reviewer_gate_phase(self, task: Task) -> PhaseResult:
+        payload = task.agent_outputs.get("review", {})
+        if not isinstance(payload, dict):
+            payload = {}
+        raw_required = payload.get("required_fixes")
+        required_fixes = (
+            [item.strip() for item in raw_required if isinstance(item, str) and item.strip()]
+            if isinstance(raw_required, list)
+            else []
+        )
+        raw_severity = payload.get("max_severity")
+        if isinstance(raw_severity, str) and raw_severity.strip():
+            max_severity = raw_severity.strip().lower()
+        else:
+            # Infer severity from risk summary when explicit severity is unavailable.
+            risk_summary = payload.get("risk_summary")
+            max_severity = "none"
+            if isinstance(risk_summary, str):
+                lower = risk_summary.lower()
+                if "critical" in lower:
+                    max_severity = "critical"
+                elif "high" in lower:
+                    max_severity = "high"
+                elif "medium" in lower:
+                    max_severity = "medium"
+                elif "low" in lower:
+                    max_severity = "low"
+        blocked_severities = {"high", "critical"}
+        passed = (not required_fixes) and (max_severity not in blocked_severities)
+        task.agent_outputs["reviewer_gate"] = {
+            "pass": passed,
+            "required_fixes": required_fixes,
+            "max_severity": max_severity,
+        }
+        if not passed:
+            return PhaseResult(
+                phase="reviewer_gate",
+                status="failed",
+                detail=(
+                    "reviewer gate failed ("
+                    f"required_fixes={len(required_fixes)}, max_severity={max_severity})"
+                ),
+                timestamp=time.time(),
+            )
+        return PhaseResult(
+            phase="reviewer_gate",
+            status="success",
+            detail="reviewer gate passed",
             timestamp=time.time(),
         )
 
@@ -1120,6 +1174,12 @@ class Supervisor:
                 "findings": [],
                 "risk_summary": "low risk",
                 "required_fixes": [],
+            }
+        if phase == "reviewer_gate":
+            return {
+                "pass": True,
+                "required_fixes": [],
+                "max_severity": "none",
             }
         if phase == "docs":
             return {

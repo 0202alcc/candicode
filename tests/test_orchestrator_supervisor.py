@@ -72,7 +72,7 @@ class SupervisorTests(unittest.TestCase):
 
             assert task is not None
             self.assertEqual("completed", task.status)
-            self.assertEqual(21, len(task.phase_history))
+            self.assertEqual(22, len(task.phase_history))
             self.assertEqual("ingress_guard", task.phase_history[0].phase)
             self.assertEqual("budget_envelope", task.phase_history[1].phase)
             self.assertEqual("intent", task.phase_history[2].phase)
@@ -85,7 +85,8 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual("code", task.phase_history[9].phase)
             self.assertEqual("security_gate", task.phase_history[12].phase)
             self.assertEqual("qa_perf_gate", task.phase_history[13].phase)
-            self.assertEqual("docs", task.phase_history[15].phase)
+            self.assertEqual("reviewer_gate", task.phase_history[15].phase)
+            self.assertEqual("docs", task.phase_history[16].phase)
             self.assertIsNotNone(task.work_branch)
 
     def test_process_next_blocks_on_failed_phase(self) -> None:
@@ -424,6 +425,7 @@ class SupervisorTests(unittest.TestCase):
                 "security_gate",
                 "qa_perf_gate",
                 "review",
+                "reviewer_gate",
                 "docs",
                 "execute",
                 "verify",
@@ -559,6 +561,36 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual("blocked", task.status)
             self.assertEqual("qa_perf_gate", task.phase_history[-1].phase)
             self.assertIn("qa/perf gate failed", task.phase_history[-1].detail)
+
+    def test_reviewer_gate_blocks_on_required_fixes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            store = StateStore(Path(tmp) / "state.json")
+
+            def review_with_required_fixes(task: Task) -> PhaseResult:
+                task.agent_outputs["review"] = {
+                    "findings": ["null dereference risk in parser"],
+                    "risk_summary": "medium risk",
+                    "required_fixes": ["add null check in parse_path"],
+                }
+                return PhaseResult(
+                    phase="review",
+                    status="success",
+                    detail="review completed",
+                    timestamp=time.time(),
+                )
+
+            supervisor = Supervisor(
+                queue=TaskQueue(),
+                state_store=store,
+                phase_handlers={"review": review_with_required_fixes},
+            )
+            supervisor.create_task("review gate required fixes")
+            task = supervisor.process_next()
+
+            assert task is not None
+            self.assertEqual("blocked", task.status)
+            self.assertEqual("reviewer_gate", task.phase_history[-1].phase)
+            self.assertIn("reviewer gate failed", task.phase_history[-1].detail)
 
     def test_requirements_gate_blocks_when_open_questions_remain(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
