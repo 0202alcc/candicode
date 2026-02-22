@@ -163,6 +163,7 @@ class Supervisor:
             "plan",
             "code",
             "test",
+            "ci_gate",
             "review",
             "docs",
             "execute",
@@ -420,6 +421,8 @@ class Supervisor:
             return self._run_router_gate_phase(task)
         if phase == "requirements_gate":
             return self._run_requirements_gate_phase(task)
+        if phase == "ci_gate":
+            return self._run_ci_gate_phase(task)
         if phase == "versioning":
             return self._run_versioning_phase(task)
         if phase == "execute":
@@ -607,6 +610,48 @@ class Supervisor:
             phase="requirements_gate",
             status="success",
             detail="requirements clear; proceeding",
+            timestamp=time.time(),
+        )
+
+    def _run_ci_gate_phase(self, task: Task) -> PhaseResult:
+        checks = self._extract_checks_to_run(task.agent_outputs.get("test", {}))
+        if self.verification_runner is None:
+            selected = sorted(checks or [])
+            task.agent_outputs["ci_gate"] = {
+                "pass": True,
+                "checks": selected,
+                "failed_checks": [],
+                "flaky_quarantined": [],
+            }
+            return PhaseResult(
+                phase="ci_gate",
+                status="success",
+                detail="ci gate passed (no verification runner configured)",
+                timestamp=time.time(),
+            )
+
+        result = self.verification_runner.run(checks=checks)
+        task.agent_outputs["ci_gate"] = {
+            "pass": result.status == "pass",
+            "checks": result.checks,
+            "failed_checks": result.failures,
+            "flaky_quarantined": result.flaky_quarantined,
+        }
+        if result.status == "pass":
+            return PhaseResult(
+                phase="ci_gate",
+                status="success",
+                detail=(
+                    "ci gate passed"
+                    if not result.flaky_quarantined
+                    else f"ci gate passed with quarantined checks: {', '.join(result.flaky_quarantined)}"
+                ),
+                timestamp=time.time(),
+            )
+        return PhaseResult(
+            phase="ci_gate",
+            status="failed",
+            detail=f"ci gate failed checks: {', '.join(result.failures)}",
             timestamp=time.time(),
         )
 
@@ -951,6 +996,13 @@ class Supervisor:
             return {
                 "tests_added": ["tests/test_stub.py"],
                 "checks_to_run": ["unit"],
+            }
+        if phase == "ci_gate":
+            return {
+                "pass": True,
+                "checks": [],
+                "failed_checks": [],
+                "flaky_quarantined": [],
             }
         if phase == "review":
             return {

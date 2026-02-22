@@ -72,7 +72,7 @@ class SupervisorTests(unittest.TestCase):
 
             assert task is not None
             self.assertEqual("completed", task.status)
-            self.assertEqual(18, len(task.phase_history))
+            self.assertEqual(19, len(task.phase_history))
             self.assertEqual("ingress_guard", task.phase_history[0].phase)
             self.assertEqual("budget_envelope", task.phase_history[1].phase)
             self.assertEqual("intent", task.phase_history[2].phase)
@@ -83,7 +83,7 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual("human_checkpoints", task.phase_history[-3].phase)
             self.assertEqual("versioning", task.phase_history[7].phase)
             self.assertEqual("code", task.phase_history[9].phase)
-            self.assertEqual("docs", task.phase_history[12].phase)
+            self.assertEqual("docs", task.phase_history[13].phase)
             self.assertIsNotNone(task.work_branch)
 
     def test_process_next_blocks_on_failed_phase(self) -> None:
@@ -321,7 +321,7 @@ class SupervisorTests(unittest.TestCase):
             self.assertEqual("failed", task.phase_history[-1].status)
             self.assertIn("protected branch edit blocked", task.phase_history[-1].detail)
 
-    def test_verify_phase_blocks_on_failed_deterministic_checks(self) -> None:
+    def test_ci_gate_blocks_on_failed_deterministic_checks(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             store = StateStore(Path(tmp) / "state.json")
 
@@ -349,8 +349,8 @@ class SupervisorTests(unittest.TestCase):
 
             assert task is not None
             self.assertEqual("blocked", task.status)
-            self.assertEqual("verify", task.phase_history[-1].phase)
-            self.assertIn("verification failed checks: unit", task.phase_history[-1].detail)
+            self.assertEqual("ci_gate", task.phase_history[-1].phase)
+            self.assertIn("ci gate failed checks: unit", task.phase_history[-1].detail)
 
     def test_contract_validation_blocks_invalid_handoff_payload(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -418,6 +418,7 @@ class SupervisorTests(unittest.TestCase):
                 "plan",
                 "code",
                 "test",
+                "ci_gate",
                 "review",
                 "docs",
                 "execute",
