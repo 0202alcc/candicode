@@ -1,6 +1,6 @@
 # CandiCode
 
-Custom pipeline + native OpenCode integration to run a multi-phase software-engineering workflow (`intent -> triage -> requirements -> plan -> code -> test -> review -> docs -> execute -> verify -> gates`).
+Custom pipeline + native OpenCode integration to run a multi-phase software-engineering workflow (`ingress_guard -> budget_envelope -> intent -> triage -> router_gate -> requirements -> requirements_gate -> versioning -> plan -> code -> test -> ci_gate -> security_gate -> qa_perf_gate -> review -> reviewer_gate -> docs -> execute -> verify -> human_checkpoints -> waiver_gate -> gate_pre_merge -> release_rollout -> deploy_runner -> health_gate -> platform_health_gate -> dr_gate -> access_gate -> finalize`).
 
 ```mermaid
 flowchart TD
@@ -102,10 +102,33 @@ flowchart TD
   classDef implemented stroke:#166534,stroke-width:3px;
   classDef planned stroke:#9CA3AF,stroke-dasharray: 6 4,stroke-width:2px;
 
-  class EI,EIG,N,O,BR1,ST1 implemented;
-  class B,D,F,G,H,I,J,K,L,M,P,Q,R,S,T,U,V,W,X,Y,Z,ZA,ZB,ZC,ZD,ZE,ZF,ZG,ZH,ZI,ZJ,ZK,ZL,ZM,ZN,ZO,ZP,ZQ,ZR,ZS,ZT,ZU,ZV,ZW,ZX,ZY,ZZ planned;
+  class EI,EIG,N,O,BR1,ST1,D,E,G,H,J,Q,R,U,V,X,Y,ZA,ZB,ZD,ZF,ZI,ZL,ZM,ZN,ZQ,ZR,ZS,ZU,ZV,ZY,ZZ implemented;
+  class B,F,I,K,L,M,P,S,T,W,Z,ZC,ZE,ZG,ZH,ZJ,ZK,ZO,ZP,ZT,ZW,ZX planned;
 
 ```
+
+## Current Implementation Status
+
+- End-to-end local pipeline phases implemented through Step 14 (closed loop):
+  - ingress + trust controls (`ingress_guard`)
+  - budget assignment/enforcement (`budget_envelope`)
+  - intent resolution and strict edit enforcement
+  - routing confidence gate (`router_gate`)
+  - requirements clarity gate (`requirements_gate`)
+  - deterministic CI gate with flaky governance (`ci_gate`)
+  - security gate (`security_gate`)
+  - QA/perf gate (`qa_perf_gate`)
+  - reviewer gate (`reviewer_gate`)
+  - state snapshots + replay invalidation + provenance metadata
+  - waiver gate + immutable waiver logging (`waiver_gate`)
+  - staged rollout/deploy/health with auto rollback
+  - platform health, DR, and access governance gates
+
+- Step 14 close-loop validation (full repository test suite):
+  - Command:
+    - `python3 -m unittest discover -s tests -p "test_*.py" -v`
+  - Result:
+    - `Ran 112 tests ... OK`
 
 
 This repo **does not vendor** OpenCode core.  

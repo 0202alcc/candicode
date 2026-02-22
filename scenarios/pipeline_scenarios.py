@@ -45,6 +45,12 @@ def _backend_response_schema() -> Path:
 
 def _basic_responses() -> Dict[str, Dict]:
     return {
+        "intent_agent": {
+            "rewritten_prompt": "Fix null pointer in parser with exact file edits.",
+            "target_files": [],
+            "success_criteria": ["null pointer removed"],
+            "proposed_new_files": [],
+        },
         "triage_agent": {
             "task_type": "bug",
             "risk_level": "low",
@@ -178,10 +184,10 @@ def scenario_security_triggered_block() -> ScenarioResult:
             policy_context_resolver=failing_security,
         )
         task = supervisor.run_prompt("patch auth")
-        ok = task.status == "blocked" and task.phase_history[-1].phase == "gate_pre_merge"
+        ok = task.status == "blocked" and task.phase_history[-1].phase == "waiver_gate"
         return ScenarioResult(
             name="security_triggered_block",
-            expected="blocked@gate_pre_merge",
+            expected="blocked@waiver_gate",
             actual=f"{task.status}@{task.phase_history[-1].phase}",
             passed=ok,
             detail=task.phase_history[-1].detail,
